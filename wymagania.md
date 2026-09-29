@@ -24,6 +24,8 @@
   2. przeciwnicy mają różne HP: Imp 1, Szkielet 2, Widmo 3 (+1 HP co 4 fale),
   3. **gracz ma limit amunicji** na podstawowy pocisk: 40 sztuk, pełne uzupełnienie na starcie fali,
      powolna regeneracja (1 szt. / 0,8 s), żeby gra nigdy się nie zablokowała. Zaklęcia specjalne kosztują manę, nie amunicję.
+  4. **zawijanie przy ścianie:** uderzenie maga w lewą/prawą krawędź planszy nie odbiera życia –
+     mag pojawia się po przeciwnej stronie planszy (wyjście w lewo → wejście z prawej i odwrotnie).
 - Wszystkie parametry (HP, prędkości, amunicja, mana, punkty) są w jednym pliku `js/config.js` – łatwo je zmieniać.
 - Formacja wrogów: 4 rzędy × 8 kolumn (Widmo, Szkielet, Imp, Imp) – dopasowane do limitu amunicji.
 
@@ -104,7 +106,7 @@ Domyślnie: mag w szacie z kosturem.
 - [ ] tylko lewo–prawo na dole ekranu (klasycznie)
 - [ ] swobodny ruch w dolnej części ekranu
 Domyślnie: tylko lewo–prawo.
-**Odpowiedź:**
+**Odpowiedź:** lewo–prawo; po dojściu do ściany mag nie traci życia, tylko pojawia się po drugiej stronie planszy (zawijanie).
 
 **3.3. Liczba żyć na start i czy można je zdobywać?**
 Domyślnie: 3 życia, +1 życie co 10 000 punktów.
