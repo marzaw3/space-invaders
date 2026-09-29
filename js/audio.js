@@ -1,4 +1,4 @@
-// Proste efekty dźwiękowe generowane przez Web Audio – bez plików audio.
+// Proste efekty dźwiękowe generowane przez Web Audio - bez plików audio.
 (function (root) {
   'use strict';
 

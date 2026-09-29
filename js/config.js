@@ -1,4 +1,4 @@
-// Wszystkie parametry gry w jednym miejscu – zmień wartości tutaj, żeby dostroić rozgrywkę.
+// Wszystkie parametry gry w jednym miejscu - zmień wartości tutaj, żeby dostroić rozgrywkę.
 (function (root) {
   'use strict';
 
@@ -24,7 +24,7 @@
 
     mana: { max: 100, regenPerSec: 8 },
 
-    // Kolejność = klawisze 1..4. unlockWave – od której fali zaklęcie jest dostępne.
+    // Kolejność = klawisze 1..4. unlockWave - od której fali zaklęcie jest dostępne.
     spells: [
       { id: 'bolt', name: 'Magiczny pocisk', short: 'Pocisk', cost: { ammo: 1 }, cooldown: 0.28,
         damage: 1, speed: 520, radius: 4, color: '#c9a2ff', unlockWave: 1 },

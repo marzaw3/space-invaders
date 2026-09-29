@@ -4,7 +4,7 @@
 
   const SCALE = 3;
 
-  // X – kolor główny, o – oczy/detal, f – twarz, g – świecący kryształ kostura.
+  // X - kolor główny, o - oczy/detal, f - twarz, g - świecący kryształ kostura.
   const PLAYER = [
     '......X.....g',
     '.....XXX....o',
