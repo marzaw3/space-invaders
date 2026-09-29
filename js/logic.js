@@ -1,9 +1,25 @@
-// Czysta logika gry (bez DOM) – używana przez game.js i testy w Node.
+// Czysta logika gry (bez DOM) - używana przez game.js i testy w Node.
 (function (root) {
   'use strict';
 
   function rectsOverlap(a, b) {
     return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  }
+
+  // ---------- gracz ----------
+
+  // Zawijanie przy ścianie: gdy środek maga wyjdzie za krawędź, mag pojawia się po drugiej stronie.
+  function wrapX(x, w, width) {
+    const center = (((x + w / 2) % width) + width) % width;
+    return center - w / 2;
+  }
+
+  // Kopie prostokąta przesunięte o szerokość planszy - potrzebne, gdy mag stoi okrakiem na krawędzi.
+  function wrappedRects(rect, width) {
+    const rects = [rect];
+    if (rect.x < 0) rects.push(Object.assign({}, rect, { x: rect.x + width }));
+    if (rect.x + rect.w > width) rects.push(Object.assign({}, rect, { x: rect.x - width }));
+    return rects;
   }
 
   // ---------- wrogowie ----------
@@ -238,6 +254,7 @@
 
   const Logic = {
     rectsOverlap,
+    wrapX, wrappedRects,
     enemyHp, formationStartY, createFormation, aliveCount, formationSpeed, stepFormation,
     enemyFireInterval, pickShooters, damageEnemy, enemiesInRadius, reachedLine,
     BARRIER_SHAPE, createBarriers, hitBarrier, erodeBarriers,

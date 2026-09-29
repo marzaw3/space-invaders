@@ -1,4 +1,4 @@
-// Arcane Invaders – pętla gry, sterowanie, rysowanie i ekrany.
+// Arcane Invaders - pętla gry, sterowanie, rysowanie i ekrany.
 (function () {
   'use strict';
 
@@ -114,7 +114,7 @@
     const s = C.spells[index];
     if (!s) return;
     if (s.unlockWave > game.wave) {
-      showMessage(s.name + ' – dostępne od fali ' + s.unlockWave);
+      showMessage(s.name + ' - dostępne od fali ' + s.unlockWave);
       return;
     }
     game.spellIndex = index;
@@ -156,7 +156,7 @@
     let dir = 0;
     if (keys.has('ArrowLeft') || keys.has('KeyA')) dir -= 1;
     if (keys.has('ArrowRight') || keys.has('KeyD')) dir += 1;
-    p.x = clamp(p.x + dir * C.player.speed * dt, 8, C.width - 8 - p.w);
+    p.x = L.wrapX(p.x + dir * C.player.speed * dt, p.w, C.width);
     p.cooldown = Math.max(0, p.cooldown - dt);
     p.invuln = Math.max(0, p.invuln - dt);
     if (keys.has('Space')) tryCast();
@@ -269,7 +269,7 @@
         sparks(cell.x + cell.w / 2, cell.y + cell.h / 2, '#ff6a8a', 4);
         continue;
       }
-      if (p.invuln <= 0 && L.rectsOverlap(b, playerHitbox(p))) {
+      if (p.invuln <= 0 && L.wrappedRects(playerHitbox(p), C.width).some(r => L.rectsOverlap(b, r))) {
         b.dead = true;
         playerHit();
         if (state !== 'playing') return;
@@ -414,7 +414,9 @@
 
     const p = g.player;
     if (state === 'playing' || state === 'paused') {
-      if (p.invuln <= 0 || Math.floor(time * 12) % 2 === 0) ctx.drawImage(Sprites.player, Math.round(p.x), Math.round(p.y));
+      if (p.invuln <= 0 || Math.floor(time * 12) % 2 === 0) {
+        for (const r of L.wrappedRects(p, C.width)) ctx.drawImage(Sprites.player, Math.round(r.x), Math.round(r.y));
+      }
     }
 
     ctx.save();
@@ -572,29 +574,29 @@
     });
 
     const lines = [
-      '← →  /  A D   – ruch maga',
-      'Spacja   – rzuć zaklęcie (pocisk zużywa amunicję!)',
-      '1–4  /  Q E   – wybór zaklęcia (nowe co falę)',
-      'P / Esc – pauza     M – dźwięk',
+      '← →  /  A D   - ruch maga (przez krawędź na drugą stronę)',
+      'Spacja   - rzuć zaklęcie (pocisk zużywa amunicję!)',
+      '1-4  /  Q E   - wybór zaklęcia (nowe co falę)',
+      'P / Esc - pauza     M - dźwięk',
     ];
     lines.forEach((l, i) => text(l, C.width / 2, 370 + i * 28, 18, '#c9bdf0', 'center'));
 
-    if (blink()) text('ENTER – START', C.width / 2, 505, 28, '#fff27a', 'center', 700);
-    text('R – ranking      Rekord: ' + bestScore(), C.width / 2, 550, 18, '#a898e0', 'center');
+    if (blink()) text('ENTER - START', C.width / 2, 505, 28, '#fff27a', 'center', 700);
+    text('R - ranking      Rekord: ' + bestScore(), C.width / 2, 550, 18, '#a898e0', 'center');
   }
 
   function drawPause() {
     dim(0.6);
     text('PAUZA', C.width / 2, 250, 56, '#e6dcff', 'center', 700);
-    text('P / Esc – wznów      Q – wyjdź do menu', C.width / 2, 320, 20, '#c9bdf0', 'center');
+    text('P / Esc - wznów      Q - wyjdź do menu', C.width / 2, 320, 20, '#c9bdf0', 'center');
   }
 
   function drawGameOver() {
     dim(0.65);
     text('KONIEC GRY', C.width / 2, 220, 56, '#ff5a7a', 'center', 700);
     text('Wynik: ' + game.score + '     Fala: ' + game.wave, C.width / 2, 290, 24, '#e6dcff', 'center');
-    if (blink()) text('ENTER – zagraj ponownie', C.width / 2, 360, 24, '#fff27a', 'center');
-    text('Esc – menu     R – ranking', C.width / 2, 400, 18, '#a898e0', 'center');
+    if (blink()) text('ENTER - zagraj ponownie', C.width / 2, 360, 24, '#fff27a', 'center');
+    text('Esc - menu     R - ranking', C.width / 2, 400, 18, '#a898e0', 'center');
   }
 
   function drawEnterName() {
@@ -607,13 +609,13 @@
     ctx.strokeStyle = '#9b6bff';
     ctx.strokeRect(C.width / 2 - 150.5, 344.5, 300, 44);
     text(nameBuffer + (blink() ? '_' : ' '), C.width / 2, 368, 26, '#ffffff', 'center');
-    text('Enter – zapisz', C.width / 2, 420, 18, '#a898e0', 'center');
+    text('Enter - zapisz', C.width / 2, 420, 18, '#a898e0', 'center');
   }
 
   function drawRanking() {
     text('RANKING', C.width / 2, 70, 48, '#d9c6ff', 'center', 700);
     if (!highscores.length) {
-      text('Brak wyników – zagraj pierwszy!', C.width / 2, 280, 22, '#c9bdf0', 'center');
+      text('Brak wyników - zagraj pierwszy!', C.width / 2, 280, 22, '#c9bdf0', 'center');
     } else {
       text('#', 180, 125, 16, '#6a5a9a');
       text('IMIĘ', 220, 125, 16, '#6a5a9a');
@@ -633,7 +635,7 @@
         text(String(h.wave || '-'), 610, y, 20, color, 'right');
       });
     }
-    text('Enter / Esc – menu', C.width / 2, 560, 18, '#a898e0', 'center');
+    text('Enter / Esc - menu', C.width / 2, 560, 18, '#a898e0', 'center');
   }
 
   function render() {
@@ -740,7 +742,8 @@
   let acc = 0;
 
   function frame(now) {
-    let dt = (now - last) / 1000;
+    // Pierwszy znacznik z requestAnimationFrame bywa wcześniejszy niż performance.now() z chwili startu.
+    let dt = Math.max(0, (now - last) / 1000);
     last = now;
     if (dt > 0.25) dt = 0.25;
     time += dt;
