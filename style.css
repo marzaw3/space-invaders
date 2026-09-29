@@ -2,7 +2,7 @@ html,
 body {
   margin: 0;
   height: 100%;
-  background: #030210;
+  background: #07040f;
   overflow: hidden;
 }
 
@@ -15,5 +15,5 @@ body {
 canvas {
   display: block;
   image-rendering: pixelated;
-  box-shadow: 0 0 40px rgba(120, 80, 255, 0.35);
+  box-shadow: 0 0 0 1px rgba(242, 196, 109, 0.25), 0 0 60px rgba(160, 60, 140, 0.35);
 }
