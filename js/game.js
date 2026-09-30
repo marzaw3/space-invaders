@@ -1,4 +1,4 @@
-// Arcane Invaders – pętla gry, sterowanie, rysowanie i ekrany.
+// Arcane Invaders - pętla gry, sterowanie, rysowanie i ekrany.
 (function () {
   'use strict';
 
@@ -6,6 +6,12 @@
   const L = window.Logic;
   const STEP = C.fixedStep;
   const FONT = '"Pixelify Sans", "Courier New", monospace';
+  const TITLE_FONT = '"Jacquard 24", "Pixelify Sans", serif';
+  if (document.fonts) {
+    document.fonts.load('40px "Jacquard 24"');
+    document.fonts.load('20px "Pixelify Sans"');
+    document.fonts.load('700 20px "Pixelify Sans"');
+  }
 
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
@@ -42,6 +48,7 @@
   let lastRank = -1;
   let time = 0;
   let shake = 0;
+  let sigilPulse = 0;
   const keys = new Set();
   const particles = [];
   const stars = [];
@@ -114,7 +121,7 @@
     const s = C.spells[index];
     if (!s) return;
     if (s.unlockWave > game.wave) {
-      showMessage(s.name + ' – dostępne od fali ' + s.unlockWave);
+      showMessage(s.name + ' - dostępne od fali ' + s.unlockWave);
       return;
     }
     game.spellIndex = index;
@@ -139,7 +146,7 @@
     }
     L.payCost(s, game);
     p.cooldown = s.cooldown;
-    game.bullets.push({ x: p.x + p.w / 2, y: p.y - 4, r: s.radius, vy: -s.speed, spell: s, pierce: s.pierce || 1, hit: new Set() });
+    game.bullets.push({ x: p.x + p.w / 2, y: p.y - 4, r: s.radius, vy: -s.speed, spell: s, pierce: s.pierce || 1, hit: new Set(), trail: [] });
     Sfx.play(s.id);
   }
 
@@ -156,7 +163,7 @@
     let dir = 0;
     if (keys.has('ArrowLeft') || keys.has('KeyA')) dir -= 1;
     if (keys.has('ArrowRight') || keys.has('KeyD')) dir += 1;
-    p.x = clamp(p.x + dir * C.player.speed * dt, 8, C.width - 8 - p.w);
+    p.x = L.wrapX(p.x + dir * C.player.speed * dt, p.w, C.width);
     p.cooldown = Math.max(0, p.cooldown - dt);
     p.invuln = Math.max(0, p.invuln - dt);
     if (keys.has('Space')) tryCast();
@@ -209,7 +216,11 @@
   function updatePlayerBullets(dt) {
     const g = game;
     for (const b of g.bullets) {
+      b.trail.push({ x: b.x, y: b.y });
+      if (b.trail.length > 8) b.trail.shift();
       b.y += b.vy * dt;
+      if (b.spell.id === 'fire' && Math.random() < 0.5) ember(b.x, b.y, '#ff8a3d');
+      if (b.spell.id === 'ice' && Math.random() < 0.3) ember(b.x, b.y, '#bff4ff');
       if (b.y < C.hudTop) {
         b.dead = true;
         continue;
@@ -269,7 +280,7 @@
         sparks(cell.x + cell.w / 2, cell.y + cell.h / 2, '#ff6a8a', 4);
         continue;
       }
-      if (p.invuln <= 0 && L.rectsOverlap(b, playerHitbox(p))) {
+      if (p.invuln <= 0 && L.wrappedRects(playerHitbox(p), C.width).some(r => L.rectsOverlap(b, r))) {
         b.dead = true;
         playerHit();
         if (state !== 'playing') return;
@@ -284,6 +295,8 @@
     if (killed) {
       addScore(e.points);
       explode(e.x + e.w / 2, e.y + e.h / 2, color, 18);
+      flash(e.x + e.w / 2, e.y + e.h / 2, color, 36);
+      sigilPulse = Math.min(1, sigilPulse + 0.35);
       Sfx.play('kill');
     } else {
       sparks(e.x + e.w / 2, e.y + e.h / 2, color, 6);
@@ -356,11 +369,16 @@
   function explode(x, y, color, n) { burst(x, y, color, n, 40, 220); }
   function sparks(x, y, color, n) { burst(x, y, color, n, 20, 100); }
   function ring(x, y, r, color) { particles.push({ ring: true, x, y, r, life: 0.3, max: 0.3, color }); }
+  function flash(x, y, color, r) { particles.push({ flash: true, x, y, r, life: 0.25, max: 0.25, color }); }
+  function ember(x, y, color) {
+    const life = 0.2 + Math.random() * 0.25;
+    particles.push({ x: x + (Math.random() - 0.5) * 6, y, vx: (Math.random() - 0.5) * 30, vy: 20 + Math.random() * 40, life, max: life, color, size: 2 });
+  }
 
   function updateParticles(dt) {
     for (const q of particles) {
       q.life -= dt;
-      if (q.ring) continue;
+      if (q.ring || q.flash) continue;
       q.x += q.vx * dt;
       q.y += q.vy * dt;
       q.vx *= 0.96;
@@ -371,157 +389,362 @@
 
   // ---------- rysowanie ----------
 
-  function text(str, x, y, size, color, align, weight) {
-    ctx.font = (weight || 400) + ' ' + size + 'px ' + FONT;
+  const P = Sprites.PALETTE;
+  const glow = Sprites.glowDot;
+
+  function text(str, x, y, size, color, align, weight, font) {
+    ctx.font = (weight || 400) + ' ' + size + 'px ' + (font || FONT);
     ctx.textAlign = align || 'left';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = color;
     ctx.fillText(str, x, y);
   }
 
+  // Nagłówki pikselową frakturą, ze złotym gradientem i żarem pod spodem.
+  function title(str, x, y, size, colors) {
+    const [top, mid, bottom] = colors || ['#fff1c4', P.gold, P.goldDeep];
+    ctx.save();
+    ctx.font = '400 ' + size + 'px ' + TITLE_FONT;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const grad = ctx.createLinearGradient(0, y - size / 2, 0, y + size / 2);
+    grad.addColorStop(0, top);
+    grad.addColorStop(0.55, mid);
+    grad.addColorStop(1, bottom);
+    ctx.shadowColor = P.ember;
+    ctx.shadowBlur = 28;
+    ctx.fillStyle = grad;
+    ctx.fillText(str, x, y);
+    ctx.shadowBlur = 0;
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(7,4,15,0.6)';
+    ctx.strokeText(str, x, y);
+    ctx.restore();
+  }
+
+  // Rysuje sprite z marginesem poświaty tak, by (x, y) był lewym górnym rogiem hitboxa.
+  function sprite(s, x, y, scale) {
+    const k = scale || 1;
+    ctx.drawImage(s.img, Math.round(x - s.ox * k), Math.round(y - s.oy * k), s.img.width * k, s.img.height * k);
+  }
+
+  function glowAt(color, x, y, r, alpha) {
+    ctx.globalAlpha = alpha;
+    ctx.drawImage(glow(color, 32), x - r, y - r, r * 2, r * 2);
+  }
+
   function drawStars() {
     for (const s of stars) {
-      ctx.globalAlpha = 0.3 + 0.7 * Math.abs(Math.sin(time * 1.5 + s.p)) * s.z;
-      ctx.fillStyle = s.z > 0.8 ? '#e6dcff' : '#8f7fd8';
-      const size = s.z > 0.8 ? 2 : 1;
-      ctx.fillRect(Math.round(s.x), Math.round(s.y), size, size);
+      const a = 0.25 + 0.75 * Math.abs(Math.sin(time * 1.5 + s.p)) * s.z;
+      ctx.globalAlpha = a;
+      ctx.fillStyle = s.z > 0.8 ? '#fff6e0' : '#9f8fe0';
+      const x = Math.round(s.x);
+      const y = Math.round(s.y);
+      if (s.z > 0.95) {
+        ctx.fillRect(x - 2, y, 5, 1);
+        ctx.fillRect(x, y - 2, 1, 5);
+      } else {
+        ctx.fillRect(x, y, s.z > 0.8 ? 2 : 1, s.z > 0.8 ? 2 : 1);
+      }
     }
     ctx.globalAlpha = 1;
   }
 
-  function drawWorld() {
-    const g = game;
-    const f = g.formation;
-
-    for (const c of g.barriers) {
-      if (!c.alive) continue;
-      ctx.fillStyle = ((c.x + c.y) / C.barriers.cell) % 2 ? '#6a4cff' : '#8466ff';
-      ctx.fillRect(c.x, c.y, c.w, c.h);
-    }
-
-    for (const e of f.enemies) {
-      if (!e.alive) continue;
-      const set = Sprites.enemies[e.type];
-      const img = e.flash > 0 ? set.flash[g.frame] : f.slowTimer > 0 ? set.frozen[g.frame] : set.frames[g.frame];
-      ctx.drawImage(img, Math.round(e.x), Math.round(e.y));
-      if (e.maxHp > 1) {
-        ctx.fillStyle = '#2a1840';
-        ctx.fillRect(Math.round(e.x), Math.round(e.y + e.h + 3), e.w, 3);
-        ctx.fillStyle = C.enemyTypes[e.type].color;
-        ctx.fillRect(Math.round(e.x), Math.round(e.y + e.h + 3), Math.round(e.w * e.hp / e.maxHp), 3);
-      }
-    }
-
-    const p = g.player;
-    if (state === 'playing' || state === 'paused') {
-      if (p.invuln <= 0 || Math.floor(time * 12) % 2 === 0) ctx.drawImage(Sprites.player, Math.round(p.x), Math.round(p.y));
-    }
-
+  // Krąg przywołania - rozbłyska przy każdym zabitym demonie i na starcie fali.
+  function drawSigil(cx, cy, scale, alpha) {
+    const pulse = Math.min(1, sigilPulse);
     ctx.save();
-    ctx.shadowBlur = 14;
-    for (const b of g.bullets) {
-      ctx.shadowColor = b.spell.color;
-      if (b.spell.id === 'lightning') {
-        ctx.strokeStyle = b.spell.color;
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(b.x, b.y - 14);
-        ctx.lineTo(b.x - 5, b.y - 4);
-        ctx.lineTo(b.x + 5, b.y + 4);
-        ctx.lineTo(b.x, b.y + 14);
-        ctx.stroke();
-      } else {
-        ctx.fillStyle = b.spell.color;
-        ctx.beginPath();
-        ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#ffffff';
-        ctx.beginPath();
-        ctx.arc(b.x, b.y, b.r / 2, 0, Math.PI * 2);
-        ctx.fill();
-      }
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.translate(cx, cy);
+    const r = 170 * scale * (1 + pulse * 0.15);
+    ctx.globalAlpha = (0.12 + pulse * 0.3) * alpha;
+    ctx.drawImage(glow(P.gold, 32), -r, -r, r * 2, r * 2);
+
+    ctx.globalAlpha = (0.2 + pulse * 0.45) * alpha;
+    ctx.save();
+    ctx.rotate(time * 0.06);
+    ctx.scale(scale, scale);
+    ctx.drawImage(Sprites.sigilOuter, -Sprites.sigilOuter.width / 2, -Sprites.sigilOuter.height / 2);
+    ctx.restore();
+
+    ctx.globalAlpha = (0.28 + pulse * 0.5) * alpha;
+    ctx.save();
+    ctx.rotate(-time * 0.13);
+    const k = scale * (1 + pulse * 0.05);
+    ctx.scale(k, k);
+    ctx.drawImage(Sprites.sigilInner, -Sprites.sigilInner.width / 2, -Sprites.sigilInner.height / 2);
+    ctx.restore();
+    ctx.restore();
+  }
+
+  function drawBackground(sigilAlpha) {
+    drawStars();
+    drawSigil(C.width / 2, 185, 1, sigilAlpha);
+    ctx.drawImage(Sprites.skyline, 0, 0);
+    const mx = (time * 10) % C.width;
+    ctx.drawImage(Sprites.mist, -mx, C.height - 330);
+    ctx.drawImage(Sprites.mist, C.width - mx, C.height - 330);
+    ctx.drawImage(Sprites.parapet, 0, C.player.y + C.player.height);
+  }
+
+  // Runiczne kamienie: faktura z haszu pozycji, co czwarty blok ma świecącą runę.
+  function drawBarriers(cells) {
+    const n = C.barriers.cell;
+    for (const c of cells) {
+      if (!c.alive) continue;
+      const x = Math.round(c.x);
+      const y = Math.round(c.y);
+      const k = (Math.round(c.x / n) * 7 + Math.round(c.y / n) * 13) % 5;
+      ctx.fillStyle = k < 1 ? P.stoneLight : k < 3 ? P.stone : '#3b2e55';
+      ctx.fillRect(x, y, n, n);
+      ctx.fillStyle = 'rgba(255,255,255,0.14)';
+      ctx.fillRect(x, y, n, 1);
+      ctx.fillStyle = 'rgba(7,4,15,0.35)';
+      ctx.fillRect(x, y + n - 1, n, 1);
     }
-    ctx.shadowColor = '#ff3355';
-    ctx.fillStyle = '#ff7a9a';
-    for (const b of g.enemyBullets) {
-      const wobble = Math.sin(time * 30 + b.x) * 1.5;
-      ctx.fillRect(Math.round(b.x + wobble), Math.round(b.y), b.w, b.h);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const c of cells) {
+      if (!c.alive) continue;
+      const k = Math.round(c.x / n) * 31 + Math.round(c.y / n) * 17;
+      if (k % 4 !== 0) continue;
+      const x = Math.round(c.x);
+      const y = Math.round(c.y);
+      const a = 0.45 + 0.4 * Math.sin(time * 2.2 + k);
+      glowAt(P.moonTeal, x + n / 2, y + n / 2, 10, a * 0.35);
+      ctx.globalAlpha = a;
+      ctx.fillStyle = P.moonTeal;
+      ctx.fillRect(x + 3, y + 1, 2, 6);
+      if (k % 3 === 0) ctx.fillRect(x + 1, y + 3, 6, 1);
+      else ctx.fillRect(x + 5, y + 2, 2, 1);
     }
     ctx.restore();
   }
 
-  function drawParticles() {
-    for (const q of particles) {
-      ctx.globalAlpha = Math.max(0, q.life / q.max);
-      if (q.ring) {
-        ctx.strokeStyle = q.color;
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.arc(q.x, q.y, q.r * (1 - q.life / q.max * 0.6), 0, Math.PI * 2);
-        ctx.stroke();
-      } else {
-        ctx.fillStyle = q.color;
-        ctx.fillRect(q.x, q.y, q.size, q.size);
+  function drawEnemies() {
+    const g = game;
+    const f = g.formation;
+    // Demony wyłaniają się z kręgu na początku fali.
+    const appear = clamp((C.waves.bannerTime - g.banner) / 0.6, 0, 1);
+    ctx.globalAlpha = appear;
+    for (const e of f.enemies) {
+      if (!e.alive) continue;
+      const set = Sprites.enemies[e.type];
+      const s = e.flash > 0 ? set.flash[g.frame] : f.slowTimer > 0 ? set.frozen[g.frame] : set.frames[g.frame];
+      sprite(s, e.x, e.y);
+      if (e.maxHp > 1) {
+        const x = Math.round(e.x + 4);
+        const y = Math.round(e.y + e.h + 4);
+        const w = e.w - 8;
+        ctx.fillStyle = P.ink;
+        ctx.fillRect(x - 1, y - 1, w + 2, 4);
+        ctx.fillStyle = C.enemyTypes[e.type].color;
+        ctx.fillRect(x, y, Math.round(w * e.hp / e.maxHp), 2);
       }
     }
     ctx.globalAlpha = 1;
   }
 
-  function bar(x, y, w, h, ratio, color) {
-    ctx.fillStyle = '#241a4a';
+  function drawMage(x, y) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    glowAt('#5b7cff', x + C.player.width / 2, y + C.player.height, 34, 0.35);
+    ctx.restore();
+    sprite(Sprites.player, x, y);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const gx = x + Sprites.playerGem.x;
+    const gy = y + Sprites.playerGem.y;
+    const pulse = 0.6 + 0.4 * Math.sin(time * 5);
+    glowAt('#9ff5ff', gx, gy, 16 + pulse * 6, 0.55 * pulse + 0.2);
+    ctx.restore();
+  }
+
+  function drawPlayer() {
+    const p = game.player;
+    if (state !== 'playing' && state !== 'paused') return;
+    if (p.invuln > 0 && Math.floor(time * 12) % 2 !== 0) return;
+    for (const r of L.wrappedRects(p, C.width)) drawMage(r.x, r.y);
+  }
+
+  function drawLightning(b) {
+    const pts = [];
+    const len = 46;
+    for (let i = 0; i <= 6; i++) {
+      pts.push([b.x + (i === 0 || i === 6 ? 0 : (Math.random() - 0.5) * 12), b.y - 14 + (len * i) / 6]);
+    }
+    const path = () => {
+      ctx.beginPath();
+      pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+      ctx.stroke();
+    };
+    ctx.globalAlpha = 0.45;
+    ctx.strokeStyle = b.spell.color;
+    ctx.lineWidth = 7;
+    path();
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    path();
+    glowAt(b.spell.color, b.x, b.y - 14, 26, 0.8);
+  }
+
+  function drawBullets() {
+    const g = game;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineJoin = 'round';
+    for (const b of g.bullets) {
+      const s = b.spell;
+      if (s.id === 'lightning') {
+        drawLightning(b);
+        continue;
+      }
+      b.trail.forEach((t, i) => {
+        const k = (i + 1) / b.trail.length;
+        glowAt(s.color, t.x, t.y, b.r * 3.2 * k, 0.45 * k);
+      });
+      const flicker = s.id === 'fire' ? 1 + Math.sin(time * 40 + b.x) * 0.15 : 1;
+      glowAt(s.color, b.x, b.y, b.r * 4.5 * flicker, 0.9);
+      ctx.globalAlpha = 1;
+      if (s.id === 'ice') {
+        ctx.fillStyle = '#e8fbff';
+        ctx.beginPath();
+        ctx.moveTo(b.x, b.y - b.r * 2.4);
+        ctx.lineTo(b.x + b.r * 0.8, b.y);
+        ctx.lineTo(b.x, b.y + b.r * 1.4);
+        ctx.lineTo(b.x - b.r * 0.8, b.y);
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        ctx.fillStyle = s.id === 'fire' ? '#ffe08a' : '#ffffff';
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.r * 0.6 * flicker, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    for (const b of g.enemyBullets) {
+      const wobble = Math.sin(time * 30 + b.x) * 1.5;
+      const x = Math.round(b.x + wobble);
+      const y = Math.round(b.y);
+      glowAt('#ff3355', x + b.w / 2, y + b.h / 2, 14, 0.7);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#ff4a5a';
+      ctx.fillRect(x, y, b.w, b.h);
+      ctx.fillStyle = '#ffd6dc';
+      ctx.fillRect(x + 1, y + b.h - 6, b.w - 2, 5);
+    }
+    ctx.restore();
+  }
+
+  function drawWorld() {
+    drawBarriers(game.barriers);
+    drawEnemies();
+    drawPlayer();
+    drawBullets();
+  }
+
+  function drawParticles() {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const q of particles) {
+      const a = Math.max(0, q.life / q.max);
+      if (q.ring) {
+        ctx.globalAlpha = a;
+        ctx.strokeStyle = q.color;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(q.x, q.y, q.r * (1 - a * 0.6), 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (q.flash) {
+        glowAt(q.color, q.x, q.y, q.r * (1.4 - a * 0.4), a * 0.9);
+      } else {
+        ctx.globalAlpha = a;
+        ctx.fillStyle = q.color;
+        const size = q.size * (0.5 + a * 0.5);
+        ctx.fillRect(Math.round(q.x), Math.round(q.y), size, size);
+      }
+    }
+    ctx.restore();
+  }
+
+  // Pasek z wgłębieniem, połyskiem i podziałką.
+  function bar(x, y, w, h, ratio, color, ticks) {
+    ctx.fillStyle = P.ink;
+    ctx.fillRect(x - 1, y - 1, w + 2, h + 2);
+    ctx.fillStyle = '#1e1438';
     ctx.fillRect(x, y, w, h);
+    const fw = Math.round(w * clamp(ratio, 0, 1));
     ctx.fillStyle = color;
-    ctx.fillRect(x, y, Math.round(w * clamp(ratio, 0, 1)), h);
+    ctx.fillRect(x, y, fw, h);
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.fillRect(x, y, fw, 2);
+    ctx.fillStyle = 'rgba(7,4,15,0.55)';
+    for (let i = 1; i < ticks; i++) ctx.fillRect(x + Math.round((w * i) / ticks), y, 1, h);
+  }
+
+  function hudStrip(y, h, lineY) {
+    ctx.fillStyle = 'rgba(9,5,20,0.88)';
+    ctx.fillRect(0, y, C.width, h);
+    const line = ctx.createLinearGradient(0, 0, C.width, 0);
+    line.addColorStop(0, Sprites.rgba(P.gold, 0));
+    line.addColorStop(0.5, Sprites.rgba(P.gold, 0.8));
+    line.addColorStop(1, Sprites.rgba(P.gold, 0));
+    ctx.fillStyle = line;
+    ctx.fillRect(0, lineY, C.width, 1);
   }
 
   function drawHud() {
     const g = game;
     const top = C.hudTop;
     const bottomY = C.height - C.hudBottom;
+    const dimText = '#9d8cc4';
 
-    ctx.fillStyle = '#120d2e';
-    ctx.fillRect(0, 0, C.width, top);
-    ctx.fillRect(0, bottomY, C.width, C.hudBottom);
-    ctx.fillStyle = '#3a2a7a';
-    ctx.fillRect(0, top - 2, C.width, 2);
-    ctx.fillRect(0, bottomY, C.width, 2);
+    hudStrip(0, top, top - 1);
+    hudStrip(bottomY, C.hudBottom, bottomY);
 
-    text('WYNIK ' + String(g.score).padStart(6, '0'), 14, top / 2, 18, '#e6dcff');
-    text('REKORD ' + String(bestScore()).padStart(6, '0'), 230, top / 2, 18, '#a898e0');
-    text('FALA ' + g.wave, 470, top / 2, 18, '#fff27a');
+    const cy = top / 2;
+    text('Wynik', 14, cy, 14, dimText);
+    text(String(g.score).padStart(6, '0'), 62, cy, 20, P.parchment, 'left', 700);
+    text('Rekord', 200, cy, 14, dimText);
+    text(String(bestScore()).padStart(6, '0'), 254, cy, 20, '#c9b8e8', 'left', 700);
+    text('Fala', 408, cy, 14, dimText);
+    text(String(g.wave), 444, cy, 20, P.gold, 'left', 700);
 
     const shown = Math.min(g.lives, 5);
-    for (let i = 0; i < shown; i++) ctx.drawImage(Sprites.player, 580 + i * 26, 11, 20, 16);
-    if (g.lives > 5) text('x' + g.lives, 580 + 5 * 26, top / 2, 16, '#e6dcff');
-    text(Sfx.isMuted() ? '♪ WYŁ' : '♪', C.width - 14, top / 2, 16, Sfx.isMuted() ? '#6a5a9a' : '#e6dcff', 'right');
+    for (let i = 0; i < shown; i++) sprite(Sprites.player, 560 + i * 26, 12, 0.5);
+    if (g.lives > 5) text('×' + g.lives, 560 + 5 * 26, cy, 16, P.parchment);
+    text(Sfx.isMuted() ? '♪ wył.' : '♪', C.width - 14, cy, 16, Sfx.isMuted() ? '#6a5a9a' : P.parchment, 'right');
 
-    const cy = bottomY + C.hudBottom / 2 + 1;
+    const by = bottomY + C.hudBottom / 2 + 1;
     const lowAmmo = g.ammo <= 5;
-    text('AMUNICJA', 12, cy, 14, lowAmmo && Math.floor(time * 4) % 2 ? '#ff5a7a' : '#c9a2ff');
-    bar(88, cy - 5, 90, 10, g.ammo / C.ammo.max, lowAmmo ? '#ff5a7a' : '#c9a2ff');
-    text(g.ammo + '/' + C.ammo.max, 184, cy, 14, '#e6dcff');
+    const ammoColor = lowAmmo ? '#ff5a7a' : '#c9a2ff';
+    text('Amunicja', 12, by, 14, lowAmmo && Math.floor(time * 4) % 2 ? '#ff5a7a' : dimText);
+    bar(78, by - 5, 96, 10, g.ammo / C.ammo.max, ammoColor, 8);
+    text(g.ammo + '/' + C.ammo.max, 182, by, 14, P.parchment);
 
-    text('MANA', 250, cy, 14, '#7fe3ff');
-    bar(292, cy - 5, 90, 10, g.mana / C.mana.max, '#4aa8ff');
+    text('Mana', 240, by, 14, dimText);
+    bar(278, by - 5, 96, 10, g.mana / C.mana.max, '#4aa8ff', 4);
 
-    let x = 410;
+    let x = 402;
     C.spells.forEach((s, i) => {
       const locked = s.unlockWave > g.wave;
       const active = i === g.spellIndex;
       const label = (i + 1) + ' ' + (locked ? '🔒' : s.short);
       ctx.font = '400 14px ' + FONT;
-      const w = ctx.measureText(label).width + 12;
+      const w = ctx.measureText(label).width + 14;
       if (active) {
-        ctx.fillStyle = s.color;
-        ctx.globalAlpha = 0.25;
-        ctx.fillRect(x - 4, cy - 10, w, 20);
-        ctx.globalAlpha = 1;
-        ctx.strokeStyle = s.color;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        glowAt(s.color, x - 4 + w / 2, by, w * 0.7, 0.35);
+        ctx.restore();
+        ctx.strokeStyle = P.gold;
         ctx.lineWidth = 1;
-        ctx.strokeRect(x - 4.5, cy - 10.5, w, 20);
+        ctx.strokeRect(x - 4.5, by - 10.5, w, 20);
       }
       const affordable = L.canCast(s, g);
-      text(label, x + 2, cy, 14, locked ? '#4a3f7a' : affordable ? s.color : '#7a6a9a');
+      text(label, x + 3, by, 14, locked ? '#4a3f7a' : affordable ? s.color : '#7a6a9a');
       x += w + 6;
     });
   }
@@ -529,9 +752,11 @@
   function drawBannerAndMessage() {
     const g = game;
     if (g.banner > 0) {
-      ctx.globalAlpha = Math.min(1, g.banner * 1.5);
-      text('FALA ' + g.wave, C.width / 2, 260, 56, '#fff27a', 'center', 700);
-      if (g.bannerSub) text(g.bannerSub, C.width / 2, 305, 20, '#e6dcff', 'center');
+      const a = Math.min(1, g.banner * 1.5);
+      const rise = (1 - g.banner / C.waves.bannerTime) * 10;
+      ctx.globalAlpha = a;
+      title('Fala ' + g.wave, C.width / 2, 262 - rise, 80);
+      if (g.bannerSub) text(g.bannerSub, C.width / 2, 318 - rise, 20, P.parchment, 'center');
       ctx.globalAlpha = 1;
     }
     if (g.messageTimer > 0) {
@@ -542,7 +767,7 @@
   }
 
   function dim(alpha) {
-    ctx.fillStyle = 'rgba(5, 3, 18, ' + alpha + ')';
+    ctx.fillStyle = 'rgba(7, 4, 15, ' + alpha + ')';
     ctx.fillRect(0, 0, C.width, C.height);
   }
 
@@ -550,103 +775,98 @@
     return Math.floor(time * 2) % 2 === 0;
   }
 
-  function drawTitle(y) {
-    ctx.save();
-    ctx.shadowColor = '#9b6bff';
-    ctx.shadowBlur = 24;
-    text('ARCANE INVADERS', C.width / 2, y, 60, '#d9c6ff', 'center', 700);
-    ctx.restore();
-  }
-
   function drawMenu() {
-    drawTitle(110);
-    text('Obroń wieżę maga przed nadciągającymi demonami!', C.width / 2, 165, 20, '#a898e0', 'center');
+    title('Arcane Invaders', C.width / 2, 112, 92);
+    text('Obroń wieżę maga przed demonami z kręgu przywołania', C.width / 2, 172, 19, '#c9b8e8', 'center');
 
     const types = Object.keys(C.enemyTypes);
     types.forEach((type, i) => {
       const t = C.enemyTypes[type];
-      const y = 215 + i * 44;
-      ctx.drawImage(Sprites.enemies[type].frames[Math.floor(time * 2) % 2], 270, y);
-      text(t.name, 325, y + 14, 20, t.color);
-      text('HP ' + t.hp + '   ' + t.points + ' pkt', 440, y + 14, 20, '#e6dcff');
+      const y = 212 + i * 44;
+      sprite(Sprites.enemies[type].frames[Math.floor(time * 2) % 2], 270, y);
+      text(t.name, 326, y + 14, 20, t.color);
+      text(t.hp + ' HP   ' + t.points + ' pkt', 440, y + 14, 20, P.parchment);
     });
 
     const lines = [
-      '← →  /  A D   – ruch maga',
-      'Spacja   – rzuć zaklęcie (pocisk zużywa amunicję!)',
-      '1–4  /  Q E   – wybór zaklęcia (nowe co falę)',
-      'P / Esc – pauza     M – dźwięk',
+      '← →  /  A D   ruch maga (przez krawędź na drugą stronę)',
+      'Spacja   rzuć zaklęcie (pocisk zużywa amunicję)',
+      '1–4  /  Q E   wybór zaklęcia (nowe co falę)',
+      'P / Esc   pauza      M   dźwięk',
     ];
-    lines.forEach((l, i) => text(l, C.width / 2, 370 + i * 28, 18, '#c9bdf0', 'center'));
+    lines.forEach((l, i) => text(l, C.width / 2, 364 + i * 26, 17, '#c9bdf0', 'center'));
 
-    if (blink()) text('ENTER – START', C.width / 2, 505, 28, '#fff27a', 'center', 700);
-    text('R – ranking      Rekord: ' + bestScore(), C.width / 2, 550, 18, '#a898e0', 'center');
+    if (blink()) text('Enter – zacznij grę', C.width / 2, 490, 28, P.gold, 'center', 700);
+    text('R – ranking      Rekord: ' + bestScore(), C.width / 2, 590, 16, '#9d8cc4', 'center');
   }
 
   function drawPause() {
     dim(0.6);
-    text('PAUZA', C.width / 2, 250, 56, '#e6dcff', 'center', 700);
+    title('Pauza', C.width / 2, 250, 84);
     text('P / Esc – wznów      Q – wyjdź do menu', C.width / 2, 320, 20, '#c9bdf0', 'center');
   }
 
   function drawGameOver() {
     dim(0.65);
-    text('KONIEC GRY', C.width / 2, 220, 56, '#ff5a7a', 'center', 700);
-    text('Wynik: ' + game.score + '     Fala: ' + game.wave, C.width / 2, 290, 24, '#e6dcff', 'center');
-    if (blink()) text('ENTER – zagraj ponownie', C.width / 2, 360, 24, '#fff27a', 'center');
-    text('Esc – menu     R – ranking', C.width / 2, 400, 18, '#a898e0', 'center');
+    title('Koniec gry', C.width / 2, 215, 84, ['#ffd0c0', '#ff6a5a', '#9a1f3a']);
+    text('Wynik: ' + game.score + '     Fala: ' + game.wave, C.width / 2, 290, 24, P.parchment, 'center');
+    if (blink()) text('Enter – zagraj ponownie', C.width / 2, 360, 24, P.gold, 'center');
+    text('Esc – menu     R – ranking', C.width / 2, 400, 18, '#9d8cc4', 'center');
   }
 
   function drawEnterName() {
     dim(0.7);
-    text('NOWY REKORD!', C.width / 2, 200, 52, '#fff27a', 'center', 700);
-    text('Wynik: ' + game.score + '     Fala: ' + game.wave, C.width / 2, 260, 22, '#e6dcff', 'center');
+    title('Nowy rekord!', C.width / 2, 195, 80);
+    text('Wynik: ' + game.score + '     Fala: ' + game.wave, C.width / 2, 260, 22, P.parchment, 'center');
     text('Wpisz swoje imię:', C.width / 2, 320, 20, '#c9bdf0', 'center');
-    ctx.fillStyle = '#1c1444';
+    ctx.fillStyle = '#140c2c';
     ctx.fillRect(C.width / 2 - 150, 345, 300, 44);
-    ctx.strokeStyle = '#9b6bff';
+    ctx.strokeStyle = P.gold;
+    ctx.lineWidth = 1;
     ctx.strokeRect(C.width / 2 - 150.5, 344.5, 300, 44);
     text(nameBuffer + (blink() ? '_' : ' '), C.width / 2, 368, 26, '#ffffff', 'center');
-    text('Enter – zapisz', C.width / 2, 420, 18, '#a898e0', 'center');
+    text('Enter – zapisz', C.width / 2, 420, 18, '#9d8cc4', 'center');
   }
 
   function drawRanking() {
-    text('RANKING', C.width / 2, 70, 48, '#d9c6ff', 'center', 700);
+    dim(0.45);
+    title('Ranking', C.width / 2, 70, 72);
     if (!highscores.length) {
       text('Brak wyników – zagraj pierwszy!', C.width / 2, 280, 22, '#c9bdf0', 'center');
     } else {
-      text('#', 180, 125, 16, '#6a5a9a');
-      text('IMIĘ', 220, 125, 16, '#6a5a9a');
-      text('WYNIK', 520, 125, 16, '#6a5a9a', 'right');
-      text('FALA', 610, 125, 16, '#6a5a9a', 'right');
+      text('#', 180, 125, 16, '#8a7ab4');
+      text('Imię', 220, 125, 16, '#8a7ab4');
+      text('Wynik', 520, 125, 16, '#8a7ab4', 'right');
+      text('Fala', 610, 125, 16, '#8a7ab4', 'right');
       highscores.forEach((h, i) => {
         const y = 160 + i * 34;
         const hl = i === lastRank;
         if (hl) {
-          ctx.fillStyle = 'rgba(255, 242, 122, 0.12)';
+          ctx.fillStyle = Sprites.rgba(P.gold, 0.14);
           ctx.fillRect(165, y - 15, 470, 30);
         }
-        const color = hl ? '#fff27a' : i === 0 ? '#ffd27a' : '#e6dcff';
+        const color = hl ? '#fff1c4' : i === 0 ? P.gold : P.parchment;
         text(String(i + 1), 180, y, 20, color);
         text(h.name, 220, y, 20, color);
         text(String(h.score), 520, y, 20, color, 'right');
         text(String(h.wave || '-'), 610, y, 20, color, 'right');
       });
     }
-    text('Enter / Esc – menu', C.width / 2, 560, 18, '#a898e0', 'center');
+    text('Enter / Esc – menu', C.width / 2, 560, 18, '#9d8cc4', 'center');
   }
 
   function render() {
-    ctx.fillStyle = '#07051a';
-    ctx.fillRect(0, 0, C.width, C.height);
+    ctx.drawImage(Sprites.sky, 0, 0);
 
+    const inGame = game && state !== 'menu' && state !== 'ranking';
     ctx.save();
     if (shake > 0) ctx.translate((Math.random() - 0.5) * 24 * shake, (Math.random() - 0.5) * 24 * shake);
-    drawStars();
-    const inGame = game && state !== 'menu' && state !== 'ranking';
+    drawBackground(inGame ? 0.7 : 1);
     if (inGame) drawWorld();
+    else if (state === 'menu') drawMage((C.width - C.player.width) / 2, C.player.y);
     drawParticles();
     ctx.restore();
+    ctx.drawImage(Sprites.vignette, 0, 0);
 
     if (inGame) {
       drawHud();
@@ -740,7 +960,8 @@
   let acc = 0;
 
   function frame(now) {
-    let dt = (now - last) / 1000;
+    // Pierwszy znacznik z requestAnimationFrame bywa wcześniejszy niż performance.now() z chwili startu.
+    let dt = Math.max(0, (now - last) / 1000);
     last = now;
     if (dt > 0.25) dt = 0.25;
     time += dt;
@@ -762,6 +983,8 @@
     if (state !== 'paused') {
       updateParticles(dt);
       shake = Math.max(0, shake - dt);
+      sigilPulse = Math.max(0, sigilPulse - dt * 1.5);
+      if (state === 'playing' && game.banner > 0) sigilPulse = Math.max(sigilPulse, game.banner / C.waves.bannerTime);
     }
 
     render();
