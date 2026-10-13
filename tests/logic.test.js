@@ -217,6 +217,41 @@ test('sanitizeName: obcina, czyści i ma wartość domyślną', () => {
   assert.equal(L.sanitizeName(null, 10), 'MAG');
 });
 
+// ---------- konto gracza ----------
+
+test('validateNick: granice długości 3-10, spacje na brzegach obcięte', () => {
+  assert.deepEqual(L.validateNick('ab', C), { ok: false, error: 'too_short' });
+  assert.deepEqual(L.validateNick('abc', C), { ok: true, nick: 'abc' });
+  assert.deepEqual(L.validateNick('  Merlin  ', C), { ok: true, nick: 'Merlin' });
+  assert.deepEqual(L.validateNick('abcdefghij', C), { ok: true, nick: 'abcdefghij' });
+  assert.deepEqual(L.validateNick('abcdefghijk', C), { ok: false, error: 'too_long' });
+  assert.deepEqual(L.validateNick(null, C), { ok: false, error: 'too_short' });
+});
+
+test('validateNick: polskie litery, cyfry, _ i - są dozwolone, reszta nie', () => {
+  assert.equal(L.validateNick('Łucja_Ż-9', C).ok, true);
+  assert.deepEqual(L.validateNick('ma g', C), { ok: false, error: 'bad_chars' });
+  assert.deepEqual(L.validateNick('mag@x', C), { ok: false, error: 'bad_chars' });
+  assert.deepEqual(L.validateNick('mag²', C), { ok: false, error: 'bad_chars' });
+});
+
+test('nickToEmail: hex z UTF-8, wielkość liter bez znaczenia', () => {
+  assert.equal(L.nickToEmail('Łucja', C), 'uc58275636a61@hexfall.invalid');
+  assert.equal(L.nickToEmail('MERLIN', C), L.nickToEmail('merlin', C));
+  assert.equal(L.nickToEmail('abc', C), 'u616263@hexfall.invalid');
+});
+
+test('nickToEmail: najdłuższy nick mieści się w limicie e-maila (64 znaki przed @)', () => {
+  const local = L.nickToEmail('ŻŻŻŻŻŻŻŻŻŻ', C).split('@')[0];
+  assert.ok(local.length <= 64, 'długość: ' + local.length);
+});
+
+test('validatePassword: co najmniej 6 znaków', () => {
+  assert.deepEqual(L.validatePassword('12345', C), { ok: false, error: 'too_short' });
+  assert.deepEqual(L.validatePassword('123456', C), { ok: true });
+  assert.deepEqual(L.validatePassword(undefined, C), { ok: false, error: 'too_short' });
+});
+
 // ---------- zapis i wznowienie gry ----------
 
 // Gra w trakcie fali: część wrogów i barier zniszczona, pociski w locie.

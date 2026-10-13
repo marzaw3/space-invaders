@@ -252,6 +252,28 @@
     return name || 'MAG';
   }
 
+  // ---------- konto gracza ----------
+
+  // Nick: litery (także polskie), cyfry 0-9, _ i -. Baza sprawdza to samo (profiles.nick).
+  function validateNick(raw, cfg) {
+    const nick = String(raw || '').trim();
+    if (nick.length < cfg.account.nickMinLength) return { ok: false, error: 'too_short' };
+    if (nick.length > cfg.account.nickMaxLength) return { ok: false, error: 'too_long' };
+    if (!/^[\p{L}0-9_-]+$/u.test(nick)) return { ok: false, error: 'bad_chars' };
+    return { ok: true, nick };
+  }
+
+  // Techniczny e-mail konta: 'u' + hex bajtów UTF-8 nicka małymi literami. Hex przenosi polskie litery
+  // przez e-mail bez strat, a małe litery sprawiają, że Merlin i merlin to to samo konto.
+  function nickToEmail(nick, cfg) {
+    const bytes = new TextEncoder().encode(String(nick).toLowerCase());
+    return 'u' + Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('') + '@' + cfg.account.emailDomain;
+  }
+
+  function validatePassword(raw, cfg) {
+    return String(raw || '').length >= cfg.account.passwordMinLength ? { ok: true } : { ok: false, error: 'too_short' };
+  }
+
   // ---------- stan gry, zapis i wznowienie ----------
 
   // Podnieś, gdy zmieni się format migawki - starsze zapisy zostaną zignorowane.
@@ -332,6 +354,7 @@
     BARRIER_SHAPE, createBarriers, hitBarrier, erodeBarriers,
     unlockedSpells, canCast, payCost, regenAmmo,
     extraLivesEarned, waveClearBonus, qualifiesForHighscore, insertHighscore, sanitizeName,
+    validateNick, nickToEmail, validatePassword,
     SAVE_VERSION, createGame, snapshotGame, restoreGame,
   };
 

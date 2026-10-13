@@ -116,9 +116,8 @@ Stała domeny i limity (3/10/6) w `js/config.js` (sekcja `account`), jak inne pa
 - Nowe API:
   - `account()` → `{ nick }` dla zalogowanego, `null` dla gościa (synchronicznie, z pamięci).
   - `register(nick, password)` → `{ ok: true }` albo `{ error }`.
-    Sesja anonimowa: `updateUser({ email, data: { nick } })`, potem `updateUser({ password })`
-    (dokumentacja: hasło anonimowego konta dopiero po e-mailu; test na starcie sprawdzi, czy wystarczy jedno wywołanie).
-    Gdy drugi krok zawiedzie, ponowne `register` z tym samym nickiem dokańcza (ustawia hasło).
+    Sesja anonimowa: jedno `updateUser({ email, password, data: { nick } })` – test startowy potwierdził,
+    że przy wyłączonym „Confirm email” e-mail jest od razu potwierdzony, a hasło ustawione w tym samym wywołaniu.
     Brak sesji: `signUp({ email, password, options: { data: { nick } } })`.
   - `login(nick, password)` → `{ ok: true }` albo `{ error }` (`signInWithPassword`).
   - `logout()` → `signOut`, potem nowa sesja anonimowa.
@@ -167,8 +166,8 @@ Komunikaty:
 
 ## Konfiguracja Supabase (ręcznie, w panelu – robi właścicielka projektu)
 
-- Authentication → Sign In / Providers → Email: **Confirm email = wyłączone**.
-- Jeśli test startowy pokaże taką potrzebę: **Allow manual linking = włączone**.
+- Authentication → Sign In / Providers → Email: **Confirm email = wyłączone** (stan potwierdzony testem 2026-10-13).
+- „Allow manual linking” okazało się niepotrzebne.
 - Minimalna długość hasła: domyślne 6.
 
 ## Test startowy (pierwszy krok implementacji, przed resztą kodu)

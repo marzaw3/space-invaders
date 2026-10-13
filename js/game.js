@@ -39,7 +39,7 @@
 
   // ---------- stan ----------
 
-  // menu | playing | paused | enterName | gameover | ranking
+  // menu | playing | paused | enterName | gameover | ranking | account | profile
   let state = 'menu';
   let game = null;
   let nameBuffer = '';
@@ -60,8 +60,10 @@
   let cloudScores = null;
   // Przerwana gra do wznowienia: { state, version, score, wave } albo null.
   let resumable = null;
-  // Czy w tej sesji już zapisaliśmy/skasowaliśmy grę - wtedy zapis wczytany przy starcie jest nieaktualny.
+  // Czy po ostatnim wczytaniu zapisu już zapisaliśmy/skasowaliśmy grę - wtedy wczytany zapis jest nieaktualny.
   let saveTouched = false;
+  // Numer wczytania zapisu - odpowiedź z serwera spóźniona po zmianie konta jest ignorowana.
+  let saveLoads = 0;
 
   function rankingList() {
     return cloudScores || localScores;
@@ -75,10 +77,25 @@
     });
   }
 
+  // Wczytuje przerwaną grę bieżącego konta. Gdy konto jej nie ma, a gość miał (fallback), zapis gościa
+  // przechodzi na konto - po zalogowaniu ważniejszy jest zapis konta.
+  function loadResumable(fallback) {
+    const load = ++saveLoads;
+    saveTouched = false;
+    resumable = null;
+    Cloud.loadSave().then(save => {
+      if (load !== saveLoads || saveTouched) return;
+      if (save) {
+        resumable = save;
+      } else if (fallback) {
+        resumable = fallback;
+        Cloud.saveGame(fallback);
+      }
+    });
+  }
+
   loadCloudScores();
-  Cloud.loadSave().then(save => {
-    if (save && !saveTouched) resumable = save;
-  });
+  loadResumable(null);
 
   // Zapisuje bieżącą partię: na starcie fali, przy wyjściu z pauzy do menu i przy ukryciu karty.
   function persistGame() {
@@ -104,6 +121,50 @@
     game = g;
     particles.length = 0;
     state = 'paused';
+  }
+
+  // ---------- konto gracza ----------
+
+  // Profil wczytany z chmury (null = brak sieci) i co się z nim dzieje: loading | ready | loggingOut.
+  let profile = null;
+  let profileStatus = 'ready';
+  let logoutFailed = false;
+
+  function openAccount() {
+    state = 'account';
+    keys.clear();
+    Account.open(result => {
+      state = 'menu';
+      // Rejestracja zostawia to samo konto (zapis i wyniki zostają); logowanie zmienia konto.
+      if (result === 'login') loadResumable(resumable);
+      if (result) loadCloudScores();
+    });
+  }
+
+  function openProfile() {
+    state = 'profile';
+    profile = null;
+    profileStatus = 'loading';
+    logoutFailed = false;
+    Cloud.profile().then(p => {
+      profile = p;
+      profileStatus = 'ready';
+    });
+  }
+
+  function logout() {
+    if (profileStatus !== 'ready') return;
+    profileStatus = 'loggingOut';
+    logoutFailed = false;
+    Cloud.logout().then(r => {
+      profileStatus = 'ready';
+      if (!r.ok) {
+        logoutFailed = true; // bez sieci zostajemy zalogowani
+        return;
+      }
+      loadResumable(null);
+      state = 'menu';
+    });
   }
 
   function bestScore() {
@@ -367,18 +428,28 @@
     game.bullets = [];
     game.enemyBullets = [];
     discardSave();
-    // Zapisujemy każdy wynik (poza zerowym); imię podpowiadamy z poprzedniej gry.
-    if (game.score > 0) {
+    // Zapisujemy każdy wynik (poza zerowym). Zalogowany gra pod nickiem, gościowi podpowiadamy imię z poprzedniej gry.
+    const account = Cloud.account();
+    if (game.score <= 0) {
+      state = 'gameover';
+    } else if (account) {
+      submitScore(account.nick);
+    } else {
       nameBuffer = settings.lastName || '';
       state = 'enterName';
-    } else {
-      state = 'gameover';
     }
   }
 
   function saveName() {
+    const name = L.sanitizeName(nameBuffer, C.highscores.nameMaxLength);
+    settings.lastName = name;
+    Store.save(C.settingsKey, settings);
+    submitScore(name);
+  }
+
+  function submitScore(name) {
     const entry = {
-      name: L.sanitizeName(nameBuffer, C.highscores.nameMaxLength),
+      name,
       score: game.score,
       wave: game.wave,
       date: new Date().toISOString().slice(0, 10),
@@ -388,8 +459,6 @@
     // Wynik widać w rankingu od razu; lista online odświeży się, gdy serwer potwierdzi zapis.
     if (cloudScores) cloudScores = L.insertHighscore(cloudScores, entry, C.highscores.size);
     lastRank = rankingList().indexOf(entry);
-    settings.lastName = entry.name;
-    Store.save(C.settingsKey, settings);
     Cloud.submitScore(entry).then(id => {
       if (id != null) loadCloudScores(id);
     });
@@ -532,7 +601,7 @@
   }
 
   function onMenuScreen() {
-    return !game || state === 'menu' || state === 'ranking';
+    return !game || ['menu', 'ranking', 'account', 'profile'].includes(state);
   }
 
   // Obraz nie trafia w siatkę pikseli płótna, więc skalujemy go z wygładzaniem - bez niego migotałby.
@@ -1056,6 +1125,53 @@
     text('R – ranking      Rekord: ' + bestScore(), C.width / 2, 590, 16, '#9d8cc4', 'center');
     const [label, color] = CLOUD_LABELS[Cloud.status()];
     text(label, C.width - 12, 590, 14, color, 'right');
+    const account = Cloud.account();
+    if (account) text(account.nick + ' – L: profil', 12, 590, 14, P.gold);
+    else text('Gość – L: zaloguj', 12, 590, 14, '#c9bdf0');
+  }
+
+  // '2026-10-13' -> '13.10.2026'
+  function plDate(iso) {
+    return iso ? iso.split('-').reverse().join('.') : '';
+  }
+
+  function drawProfile() {
+    dim(0.55);
+    const account = Cloud.account();
+    title(account ? account.nick : 'Profil', C.width / 2, 70, 72);
+    if (account && account.joined) text('Mag od ' + plDate(account.joined), C.width / 2, 118, 18, '#c9b8e8', 'center');
+
+    if (profileStatus === 'loading') {
+      text('Wczytywanie kroniki maga...', C.width / 2, 280, 20, '#c9bdf0', 'center');
+    } else if (!profile) {
+      text('Brak połączenia – profil dostępny tylko online', C.width / 2, 280, 20, '#ff8a9a', 'center');
+    } else {
+      const s = profile.stats;
+      const tiles = [['Partie', s.games], ['Rekord', s.bestScore], ['Najdalsza fala', s.bestWave], ['Suma punktów', s.totalScore]];
+      tiles.forEach(([label, value], i) => {
+        const x = 130 + i * 180;
+        text(String(value), x, 168, 28, P.gold, 'center', 700);
+        text(label, x, 196, 14, '#8a7ab4', 'center');
+      });
+
+      text('Ostatnie partie', C.width / 2, 240, 18, '#c9b8e8', 'center');
+      if (!profile.history.length) {
+        text('Jeszcze żadnej partii – zagraj!', C.width / 2, 300, 18, '#9d8cc4', 'center');
+      } else {
+        text('Data', 250, 270, 14, '#8a7ab4');
+        text('Wynik', 470, 270, 14, '#8a7ab4', 'right');
+        text('Fala', 560, 270, 14, '#8a7ab4', 'right');
+        profile.history.forEach((h, i) => {
+          const y = 296 + i * 24;
+          text(plDate(h.date), 250, y, 17, P.parchment);
+          text(String(h.score), 470, y, 17, P.parchment, 'right');
+          text(String(h.wave), 560, y, 17, P.parchment, 'right');
+        });
+      }
+    }
+
+    if (logoutFailed) text('Brak połączenia – nie udało się wylogować', C.width / 2, 534, 16, '#ff8a9a', 'center');
+    text(profileStatus === 'loggingOut' ? 'Wylogowywanie...' : 'W – wyloguj      Esc – menu', C.width / 2, 560, 18, '#9d8cc4', 'center');
   }
 
   function drawPause() {
@@ -1138,7 +1254,7 @@
       drawBackground(inGame ? 0.7 : 1);
     }
     if (inGame) drawWorld();
-    else if (state === 'menu') drawMage((C.width - C.player.width) / 2, C.player.y);
+    else if (state === 'menu' || state === 'account') drawMage((C.width - C.player.width) / 2, C.player.y);
     drawParticles();
     ctx.restore();
     ctx.drawImage(Sprites.vignette, 0, 0);
@@ -1148,7 +1264,8 @@
       drawBannerAndMessage();
     }
 
-    if (state === 'menu') drawMenu();
+    if (state === 'menu' || state === 'account') drawMenu();
+    else if (state === 'profile') drawProfile();
     else if (state === 'paused') drawPause();
     else if (state === 'gameover') drawGameOver();
     else if (state === 'enterName') drawEnterName();
@@ -1177,6 +1294,11 @@
 
   window.addEventListener('keydown', e => {
     Sfx.unlock();
+    // Okno konta obsługuje klawisze samo; tu trafiają tylko, gdy fokus uciekł poza formularz.
+    if (state === 'account') {
+      if (e.code === 'Escape') Account.close();
+      return;
+    }
     if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Space'].includes(e.code)) e.preventDefault();
     if (state === 'enterName') {
       handleNameKey(e);
@@ -1194,6 +1316,15 @@
         if (e.code === 'Enter') newGame();
         else if (e.code === 'KeyC' && resumable) resumeGame();
         else if (e.code === 'KeyR') { lastRank = -1; state = 'ranking'; }
+        else if (e.code === 'KeyL') {
+          e.preventDefault(); // inaczej "l" wpisałoby się w pole nicka, które właśnie dostaje fokus
+          if (Cloud.account()) openProfile();
+          else openAccount();
+        }
+        break;
+      case 'profile':
+        if (e.code === 'KeyW') logout();
+        else if (e.code === 'Escape' || e.code === 'Enter') state = 'menu';
         break;
       case 'playing':
         if (e.code === 'KeyP' || e.code === 'Escape') state = 'paused';

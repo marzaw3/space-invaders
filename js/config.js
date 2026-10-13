@@ -75,6 +75,10 @@
     highscores: { size: 10, nameMaxLength: 10, storageKey: 'arcaneInvaders.highscores' },
     settingsKey: 'arcaneInvaders.settings',
 
+    // Konto gracza: nick + hasło. Nick zamienia się w techniczny e-mail w tej domenie
+    // (musi się zgadzać z funkcją nick_email w bazie). Minimum hasła = domyślne minimum Supabase.
+    account: { nickMinLength: 3, nickMaxLength: 10, passwordMinLength: 6, emailDomain: 'hexfall.invalid' },
+
     // Ranking online i zapis przerwanej gry (Supabase). Klucz publishable może być jawny -
     // dostęp do danych chronią reguły RLS w bazie (supabase/migrations).
     supabase: {

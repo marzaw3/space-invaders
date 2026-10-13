@@ -17,3 +17,134 @@ canvas {
   image-rendering: pixelated;
   box-shadow: 0 0 0 1px rgba(242, 196, 109, 0.25), 0 0 60px rgba(160, 60, 140, 0.35);
 }
+
+/* ---------- okno konta (nad płótnem) ---------- */
+
+.account {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(7, 4, 15, 0.55);
+  font-family: "Pixelify Sans", "Courier New", monospace;
+  color: #efe3c8;
+}
+
+.account[hidden] {
+  display: none;
+}
+
+.account-panel {
+  width: min(380px, 100%);
+  box-sizing: border-box;
+  padding: 24px 28px 18px;
+  background: linear-gradient(#1d0d3d, #0e0826);
+  border: 1px solid #f2c46d;
+  box-shadow: 0 0 0 4px rgba(7, 4, 15, 0.8), 0 0 50px rgba(160, 60, 140, 0.45);
+}
+
+.account-panel h2 {
+  margin: 0 0 6px;
+  font-family: "Jacquard 24", "Pixelify Sans", serif;
+  font-weight: 400;
+  font-size: 44px;
+  line-height: 1;
+  text-align: center;
+  color: #f2c46d;
+}
+
+.account-hint {
+  margin: 0 0 18px;
+  font-size: 14px;
+  line-height: 1.4;
+  text-align: center;
+  color: #c9b8e8;
+}
+
+.account-panel label {
+  display: block;
+  margin-bottom: 12px;
+  font-size: 15px;
+  color: #c9bdf0;
+}
+
+.account-panel input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 4px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 20px;
+  color: #ffffff;
+  background: #140c2c;
+  border: 1px solid #6d5a8f;
+  border-radius: 0;
+}
+
+.account-panel input:focus {
+  outline: none;
+  border-color: #f2c46d;
+  box-shadow: 0 0 0 2px rgba(242, 196, 109, 0.25);
+}
+
+.account-error {
+  min-height: 1.3em;
+  margin: 0 0 10px;
+  font-size: 14px;
+  color: #ff8a9a;
+}
+
+.account-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.account-buttons button {
+  flex: 1;
+  padding: 9px 6px;
+  font: inherit;
+  font-size: 17px;
+  font-weight: 700;
+  color: #07040f;
+  background: #f2c46d;
+  border: 1px solid #f2c46d;
+  cursor: pointer;
+}
+
+.account-buttons button.secondary {
+  color: #f2c46d;
+  background: transparent;
+}
+
+.account-buttons button:hover:not(:disabled),
+.account-buttons button:focus-visible {
+  filter: brightness(1.15);
+  outline: 2px solid #8ff0dc;
+  outline-offset: 2px;
+}
+
+.account-buttons button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.account-cancel {
+  display: block;
+  margin: 14px auto 0;
+  padding: 2px 6px;
+  font: inherit;
+  font-size: 14px;
+  color: #9d8cc4;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.account-cancel:hover,
+.account-cancel:focus-visible {
+  color: #efe3c8;
+  outline: none;
+}
