@@ -71,6 +71,7 @@
 
     barriers: { count: 4, y: 450, cell: 8 },
 
+    // Klucze z dawnej nazwy gry (Arcane Invaders) - zostają, żeby gracze nie stracili rankingu.
     highscores: { size: 10, nameMaxLength: 10, storageKey: 'arcaneInvaders.highscores' },
     settingsKey: 'arcaneInvaders.settings',
   };

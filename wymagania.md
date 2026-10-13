@@ -1,6 +1,6 @@
-# Arcane Invaders – wymagania
+# Hexfall – wymagania
 
-> Kwestionariusz wymagań dla gry **Arcane Invaders** – magicznej wariacji klasycznego *Space Invaders*.
+> Kwestionariusz wymagań dla gry **Hexfall** – magicznej wariacji klasycznego *Space Invaders*.
 > Odpowiedzi na te pytania mają wystarczyć do zbudowania działającej gry w **JavaScript + HTML** lub **Python + HTML**.
 
 ---

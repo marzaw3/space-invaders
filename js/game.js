@@ -1,4 +1,4 @@
-// Arcane Invaders - pętla gry, sterowanie, rysowanie i ekrany.
+// Hexfall - pętla gry, sterowanie, rysowanie i ekrany.
 (function () {
   'use strict';
 
@@ -779,7 +779,7 @@
   }
 
   function drawMenu() {
-    title('Arcane Invaders', C.width / 2, 112, 92);
+    title('Hexfall', C.width / 2, 112, 92);
     text('Obroń wieżę maga przed demonami z kręgu przywołania', C.width / 2, 172, 19, '#c9b8e8', 'center');
 
     const types = Object.keys(C.enemyTypes);
