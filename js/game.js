@@ -531,12 +531,195 @@
     return menuArt.complete && menuArt.naturalWidth > 0;
   }
 
+  function onMenuScreen() {
+    return !game || state === 'menu' || state === 'ranking';
+  }
+
   // Obraz nie trafia w siatkę pikseli płótna, więc skalujemy go z wygładzaniem - bez niego migotałby.
   function drawMenuArt() {
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(menuArt, 0, 0, C.width, C.height);
     ctx.imageSmoothingEnabled = false;
+  }
+
+  // ---------- ożywione tło menu ----------
+
+  // Obraz jest płaski, więc ruch dokładamy na nim w kodzie. Współrzędne (w jednostkach 800×600)
+  // pasują do img/menu.png - po podmianie obrazu trzeba je przestawić.
+  const ART_FX = {
+    braziers: [{ x: 22, y: 460 }, { x: 778, y: 460 }],
+    portal: { x: 745, y: 25, r: 48, spin: -0.4 },
+    moon: { x: 95, y: 74 },
+    windows: [[42, 306], [12, 132], [32, 130], [45, 135], [16, 200], [792, 212], [726, 308]],
+    town: [[311, 488], [547, 434]],
+    sky: { x0: 190, x1: 640, y0: 20, y1: 330 }, // niebo między wieżami
+    mist: [[0, 230], [570, 800]], // fioletowa mgła w dolnych rogach
+    mistTop: 400,
+    mistBottom: 560,
+  };
+
+  const artStars = [];
+  for (let i = 0; i < 32; i++) {
+    const S = ART_FX.sky;
+    artStars.push({ x: S.x0 + Math.random() * (S.x1 - S.x0), y: S.y0 + Math.random() * (S.y1 - S.y0), p: Math.random() * 6.28, f: 0.6 + Math.random() * 1.6 });
+  }
+  const artMotes = [];
+  let shootingStar = null;
+  let nextShootingStar = 3;
+  let portalSwirl = null;
+
+  // Wycinek wiru z obrazu z miękką krawędzią - obracany nad oryginałem udaje kręcący się portal.
+  function buildPortalSwirl() {
+    const p = ART_FX.portal;
+    const k = menuArt.naturalWidth / C.width;
+    const size = Math.ceil(p.r * 2 * k);
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const g = c.getContext('2d');
+    g.drawImage(menuArt, (p.x - p.r) * k, (p.y - p.r) * k, size, size, 0, 0, size, size);
+    g.globalCompositeOperation = 'destination-in';
+    const mask = g.createRadialGradient(size / 2, size / 2, size / 4, size / 2, size / 2, size / 2);
+    mask.addColorStop(0, '#000');
+    mask.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = mask;
+    g.fillRect(0, 0, size, size);
+    return c;
+  }
+
+  // Migotanie płomienia: 0..1, każde źródło światła w innej fazie.
+  function flicker(i, speed) {
+    return 0.5 + 0.3 * Math.sin(time * speed + i * 2.1) + 0.2 * Math.sin(time * speed * 2.17 + i);
+  }
+
+  function updateArtFx(dt) {
+    const F = ART_FX;
+    for (const b of F.braziers) {
+      if (Math.random() < dt * 9) {
+        const life = 0.7 + Math.random() * 0.9;
+        artMotes.push({ x: b.x + (Math.random() - 0.5) * 14, y: b.y - 8, vx: (Math.random() - 0.5) * 14, vy: -35 - Math.random() * 35,
+          life, max: life, color: Math.random() < 0.5 ? '#ffd27a' : P.ember, size: Math.random() < 0.3 ? 2 : 1, wobble: Math.random() * 6.28 });
+      }
+    }
+    for (const [x0, x1] of F.mist) {
+      if (Math.random() < dt * 2.5) {
+        const life = 3 + Math.random() * 3;
+        artMotes.push({ x: x0 + Math.random() * (x1 - x0), y: F.mistTop + Math.random() * (F.mistBottom - F.mistTop), vx: 0, vy: -8 - Math.random() * 12,
+          life, max: life, color: Math.random() < 0.5 ? '#c18cff' : '#f0c8ff', size: Math.random() < 0.25 ? 2 : 1, wobble: Math.random() * 6.28 });
+      }
+    }
+    // Pył wciągany spiralą do portalu - im bliżej środka, tym szybciej krąży.
+    if (Math.random() < dt * 6) {
+      const r = F.portal.r + 15 + Math.random() * 45;
+      artMotes.push({ orbit: true, a: Math.random() * 6.28, r, r0: r, life: 1, max: 1, color: Math.random() < 0.5 ? '#e070ff' : '#ffb0f0', size: Math.random() < 0.3 ? 2 : 1 });
+    }
+
+    for (const m of artMotes) {
+      if (m.orbit) {
+        m.a += Math.sign(F.portal.spin) * dt * 90 / m.r;
+        m.r -= dt * (8 + 250 / m.r);
+        if (m.r < 6) m.life = 0;
+        continue;
+      }
+      m.life -= dt;
+      m.wobble += dt * 3;
+      m.x += (m.vx + Math.sin(m.wobble) * 6) * dt;
+      m.y += m.vy * dt;
+    }
+    for (let i = artMotes.length - 1; i >= 0; i--) if (artMotes[i].life <= 0) artMotes.splice(i, 1);
+
+    // Spadająca gwiazda leci zawsze ku środkowi nieba, żeby nie przecięła wież.
+    if (shootingStar) {
+      shootingStar.t += dt;
+      if (shootingStar.t > shootingStar.dur) {
+        shootingStar = null;
+        nextShootingStar = 4 + Math.random() * 7;
+      }
+    } else if ((nextShootingStar -= dt) <= 0) {
+      const S = F.sky;
+      const dir = Math.random() < 0.5 ? -1 : 1;
+      const mid = (S.x0 + S.x1) / 2;
+      shootingStar = { x: dir > 0 ? S.x0 + Math.random() * (mid - S.x0) : mid + Math.random() * (S.x1 - mid), y: S.y0 + Math.random() * 120,
+        vx: dir * (220 + Math.random() * 60), vy: 100 + Math.random() * 50, t: 0, dur: 0.55 };
+    }
+  }
+
+  function drawPortal() {
+    const p = ART_FX.portal;
+    if (!portalSwirl) portalSwirl = buildPortalSwirl();
+    ctx.save();
+    ctx.imageSmoothingEnabled = true;
+    ctx.translate(p.x, p.y);
+    ctx.rotate(time * p.spin);
+    ctx.drawImage(portalSwirl, -p.r, -p.r, p.r * 2, p.r * 2);
+    ctx.restore();
+    const pulse = 0.5 + 0.5 * Math.sin(time * 1.6);
+    glowAt('#c040ff', p.x, p.y, p.r * 1.6 + pulse * 10, 0.12 + pulse * 0.1);
+  }
+
+  function drawShootingStar() {
+    const s = shootingStar;
+    const hx = s.x + s.vx * s.t;
+    const hy = s.y + s.vy * s.t;
+    const tx = hx - s.vx * 0.15;
+    const ty = hy - s.vy * 0.15;
+    const tail = ctx.createLinearGradient(tx, ty, hx, hy);
+    tail.addColorStop(0, 'rgba(255,241,196,0)');
+    tail.addColorStop(1, 'rgba(255,241,196,1)');
+    ctx.globalAlpha = Math.sin(Math.PI * s.t / s.dur);
+    ctx.strokeStyle = tail;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(tx, ty);
+    ctx.lineTo(hx, hy);
+    ctx.stroke();
+    ctx.fillStyle = '#fff6e0';
+    ctx.fillRect(Math.round(hx) - 1, Math.round(hy) - 1, 2, 2);
+  }
+
+  function drawArtFx() {
+    const F = ART_FX;
+    const mx = (time * 6) % C.width;
+    ctx.globalAlpha = 0.7;
+    ctx.drawImage(Sprites.mist, -mx, F.mistTop - 40);
+    ctx.drawImage(Sprites.mist, C.width - mx, F.mistTop - 40);
+    ctx.globalAlpha = 1;
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    glowAt(P.gold, C.width / 2, -20, 140, 0.1 + 0.05 * Math.sin(time * 0.7));
+    glowAt(P.moonTeal, F.moon.x, F.moon.y, 60 + 4 * Math.sin(time * 0.9), 0.13 + 0.05 * Math.sin(time * 0.9));
+    drawPortal();
+    F.windows.forEach(([x, y], i) => glowAt(P.gold, x, y, 8, 0.12 + 0.18 * flicker(i, 5.3)));
+    F.town.forEach(([x, y], i) => glowAt(P.gold, x, y, 14, 0.1 + 0.08 * Math.sin(time * 1.7 + i * 2)));
+    F.braziers.forEach((b, i) => {
+      const f = flicker(i, 11);
+      glowAt(P.ember, b.x, b.y, 24 + f * 10, 0.3 + f * 0.3);
+      glowAt('#ffd27a', b.x, b.y + 2, 10 + f * 5, 0.3 + f * 0.3);
+    });
+
+    for (const s of artStars) {
+      ctx.globalAlpha = 0.15 + 0.6 * Math.max(0, Math.sin(time * s.f + s.p));
+      ctx.fillStyle = '#fff6e0';
+      ctx.fillRect(Math.round(s.x), Math.round(s.y), 1, 1);
+    }
+    if (shootingStar) drawShootingStar();
+
+    const p = F.portal;
+    for (const m of artMotes) {
+      let x = m.x;
+      let y = m.y;
+      let a = Math.min(1, m.life / m.max * 3) * Math.min(1, (m.max - m.life) * 4 + 0.2);
+      if (m.orbit) {
+        x = p.x + Math.cos(m.a) * m.r;
+        y = p.y + Math.sin(m.a) * m.r;
+        a = Math.min(1, (m.r0 - m.r) / 15) * Math.min(1, m.r / 25);
+      }
+      ctx.globalAlpha = a;
+      ctx.fillStyle = m.color;
+      ctx.fillRect(Math.round(x), Math.round(y), m.size, m.size);
+    }
+    ctx.restore();
   }
 
   function drawBackground(sigilAlpha) {
@@ -939,7 +1122,7 @@
     ctx.setTransform(canvas.width / C.width, 0, 0, canvas.height / C.height, 0, 0);
     ctx.imageSmoothingEnabled = false;
 
-    const inGame = game && state !== 'menu' && state !== 'ranking';
+    const inGame = !onMenuScreen();
     // Rozgrywka zostaje na ciemnym niebie z kodu - na jasnym obrazie pociski byłyby słabo widoczne.
     const art = !inGame && menuArtReady();
     if (art) drawMenuArt();
@@ -947,9 +1130,13 @@
 
     ctx.save();
     if (shake > 0) ctx.translate((Math.random() - 0.5) * 24 * shake, (Math.random() - 0.5) * 24 * shake);
-    // Obraz ma własne wieże, mgłę i blanki, więc dokładamy na nim tylko krąg przywołania.
-    if (art) drawSigil(C.width / 2, 185, 1, 1);
-    else drawBackground(inGame ? 0.7 : 1);
+    // Obraz ma własne wieże, mgłę i blanki, więc dokładamy na nim tylko ruch i krąg przywołania.
+    if (art) {
+      drawArtFx();
+      drawSigil(C.width / 2, 185, 1, 1);
+    } else {
+      drawBackground(inGame ? 0.7 : 1);
+    }
     if (inGame) drawWorld();
     else if (state === 'menu') drawMage((C.width - C.player.width) / 2, C.player.y);
     drawParticles();
@@ -1072,6 +1259,7 @@
       s.y += s.z * 18 * dt;
       if (s.y > C.height) { s.y = 0; s.x = Math.random() * C.width; }
     }
+    if (onMenuScreen() && menuArtReady()) updateArtFx(dt);
 
     if (state === 'playing') {
       acc += dt;
