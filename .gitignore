@@ -1,2 +1,5 @@
 Projekt Ani/
 Projekt Natalii/
+node_modules/
+# zrzuty z testu E2E (npm run test:e2e) - inne przy każdym uruchomieniu
+tests/zrzuty/
