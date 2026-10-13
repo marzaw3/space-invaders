@@ -216,3 +216,102 @@ test('sanitizeName: obcina, czyści i ma wartość domyślną', () => {
   assert.equal(L.sanitizeName('   ', 10), 'MAG');
   assert.equal(L.sanitizeName(null, 10), 'MAG');
 });
+
+// ---------- zapis i wznowienie gry ----------
+
+// Gra w trakcie fali: część wrogów i barier zniszczona, pociski w locie.
+function midGame() {
+  const g = L.createGame(C);
+  g.wave = 3;
+  g.formation = L.createFormation(3, C);
+  g.barriers = L.createBarriers(C);
+  g.score = 1230;
+  g.lives = 2;
+  g.ammo = 17;
+  g.ammoTimer = 0.3;
+  g.mana = 42.5;
+  g.spellIndex = 2;
+  g.enemyFireTimer = 0.9;
+  g.player.x = 123;
+  g.formation.dir = -1;
+  g.formation.slowTimer = 1.5;
+  g.formation.slowFactor = 0.4;
+  g.formation.enemies.forEach(e => { e.x += 7; e.y += 18; });
+  L.damageEnemy(g.formation.enemies[0], 99);
+  L.damageEnemy(g.formation.enemies[1], 1);
+  g.barriers[5].alive = false;
+  g.bullets.push({ x: 1, y: 2, spell: C.spells[0], hit: new Set() });
+  g.enemyBullets.push({ x: 3, y: 4, w: 4, h: 12 });
+  g.message = 'Za mało many!';
+  g.messageTimer = 1;
+  return g;
+}
+
+// Tak jak w prawdziwym zapisie: migawka przechodzi przez JSON (baza danych).
+function throughJson(snapshot) {
+  return JSON.parse(JSON.stringify(snapshot));
+}
+
+test('createGame: nowa gra z wartościami z konfiguracji', () => {
+  const g = L.createGame(C);
+  assert.equal(g.score, 0);
+  assert.equal(g.lives, C.player.lives);
+  assert.equal(g.wave, 0);
+  assert.equal(g.ammo, C.ammo.max);
+  assert.equal(g.mana, C.mana.max);
+  assert.equal(g.player.y, C.player.y);
+  assert.deepEqual(g.bullets, []);
+});
+
+test('zapis gry: odtworzona gra ma ten sam stan rozgrywki', () => {
+  const g = midGame();
+  const r = L.restoreGame(throughJson(L.snapshotGame(g)), L.SAVE_VERSION, C);
+  assert.ok(r);
+  for (const k of ['score', 'lives', 'wave', 'ammo', 'ammoTimer', 'mana', 'spellIndex', 'enemyFireTimer']) {
+    assert.equal(r[k], g[k], k);
+  }
+  assert.equal(r.player.x, 123);
+  assert.equal(r.player.y, C.player.y);
+  assert.equal(r.formation.dir, -1);
+  assert.equal(r.formation.slowTimer, 1.5);
+  assert.equal(r.formation.total, g.formation.total);
+  assert.deepEqual(
+    r.formation.enemies.map(e => [e.x, e.y, e.hp, e.alive]),
+    g.formation.enemies.map(e => [e.x, e.y, e.hp, e.alive]));
+  assert.deepEqual(r.barriers.map(c => c.alive), g.barriers.map(c => c.alive));
+});
+
+test('zapis gry: pociski w locie i komunikaty nie są zapisywane', () => {
+  const r = L.restoreGame(throughJson(L.snapshotGame(midGame())), L.SAVE_VERSION, C);
+  assert.deepEqual(r.bullets, []);
+  assert.deepEqual(r.enemyBullets, []);
+  assert.equal(r.messageTimer, 0);
+  assert.equal(r.banner, 0);
+});
+
+test('zapis gry: migawka mieści się z zapasem w limicie bazy (128 KB)', () => {
+  const size = JSON.stringify(L.snapshotGame(midGame())).length;
+  assert.ok(size < 32 * 1024, 'rozmiar migawki: ' + size);
+});
+
+test('zapis gry: migawka nie dzieli obiektów z grą', () => {
+  const g = midGame();
+  const s = L.snapshotGame(g);
+  g.formation.enemies[5].hp = 0;
+  g.barriers[0].alive = false;
+  assert.notEqual(s.formation.enemies[5].hp, 0);
+  assert.equal(s.barriers[0].alive, true);
+});
+
+test('zapis gry: nieznana wersja lub uszkodzone dane są odrzucane', () => {
+  const ok = throughJson(L.snapshotGame(midGame()));
+  assert.equal(L.restoreGame(ok, L.SAVE_VERSION + 1, C), null);
+  assert.equal(L.restoreGame(null, L.SAVE_VERSION, C), null);
+  assert.equal(L.restoreGame('tekst', L.SAVE_VERSION, C), null);
+  assert.equal(L.restoreGame(Object.assign({}, ok, { score: 'dużo' }), L.SAVE_VERSION, C), null);
+  assert.equal(L.restoreGame(Object.assign({}, ok, { lives: 0 }), L.SAVE_VERSION, C), null);
+  assert.equal(L.restoreGame(Object.assign({}, ok, { wave: 0 }), L.SAVE_VERSION, C), null);
+  assert.equal(L.restoreGame(Object.assign({}, ok, { spellIndex: 99 }), L.SAVE_VERSION, C), null);
+  assert.equal(L.restoreGame(Object.assign({}, ok, { formation: {} }), L.SAVE_VERSION, C), null);
+  assert.equal(L.restoreGame(Object.assign({}, ok, { barriers: null }), L.SAVE_VERSION, C), null);
+});

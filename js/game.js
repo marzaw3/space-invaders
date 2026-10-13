@@ -32,9 +32,9 @@
     },
   };
 
-  let highscores = Store.load(C.highscores.storageKey, []);
-  if (!Array.isArray(highscores)) highscores = [];
-  const settings = Object.assign({ muted: false }, Store.load(C.settingsKey, {}));
+  let localScores = Store.load(C.highscores.storageKey, []);
+  if (!Array.isArray(localScores)) localScores = [];
+  const settings = Object.assign({ muted: false, lastName: '' }, Store.load(C.settingsKey, {}));
   Sfx.setMuted(settings.muted);
 
   // ---------- stan ----------
@@ -54,32 +54,65 @@
     stars.push({ x: Math.random() * C.width, y: Math.random() * C.height, z: 0.3 + Math.random() * 0.7, p: Math.random() * 6.28 });
   }
 
+  // ---------- ranking i zapis w chmurze ----------
+
+  // Ranking online (wszyscy gracze); null = jeszcze nie wczytany albo brak sieci - wtedy pokazujemy lokalny.
+  let cloudScores = null;
+  // Przerwana gra do wznowienia: { state, version, score, wave } albo null.
+  let resumable = null;
+  // Czy w tej sesji już zapisaliśmy/skasowaliśmy grę - wtedy zapis wczytany przy starcie jest nieaktualny.
+  let saveTouched = false;
+
+  function rankingList() {
+    return cloudScores || localScores;
+  }
+
+  function loadCloudScores(highlightId) {
+    return Cloud.topScores(C.highscores.size).then(list => {
+      if (!list) return;
+      cloudScores = list;
+      if (highlightId != null) lastRank = list.findIndex(h => h.id === highlightId);
+    });
+  }
+
+  loadCloudScores();
+  Cloud.loadSave().then(save => {
+    if (save && !saveTouched) resumable = save;
+  });
+
+  // Zapisuje bieżącą partię: na starcie fali, przy wyjściu z pauzy do menu i przy ukryciu karty.
+  function persistGame() {
+    if (!game || game.lives <= 0) return;
+    saveTouched = true;
+    resumable = { state: L.snapshotGame(game), version: L.SAVE_VERSION, score: game.score, wave: game.wave };
+    Cloud.saveGame(resumable);
+  }
+
+  function discardSave() {
+    saveTouched = true;
+    resumable = null;
+    Cloud.deleteSave();
+  }
+
+  // Wznowiona gra startuje w pauzie, żeby gracz zdążył się przygotować.
+  function resumeGame() {
+    const g = resumable && L.restoreGame(resumable.state, resumable.version, C);
+    if (!g) {
+      discardSave(); // zapis uszkodzony albo ze starej wersji gry
+      return;
+    }
+    game = g;
+    particles.length = 0;
+    state = 'paused';
+  }
+
   function bestScore() {
-    return Math.max(highscores.length ? highscores[0].score : 0, game ? game.score : 0);
+    const list = rankingList();
+    return Math.max(list.length ? list[0].score : 0, game ? game.score : 0);
   }
 
   function newGame() {
-    game = {
-      score: 0,
-      lives: C.player.lives,
-      wave: 0,
-      player: { x: (C.width - C.player.width) / 2, y: C.player.y, w: C.player.width, h: C.player.height, invuln: 0, cooldown: 0 },
-      ammo: C.ammo.max,
-      ammoTimer: 0,
-      mana: C.mana.max,
-      spellIndex: 0,
-      bullets: [],
-      enemyBullets: [],
-      formation: null,
-      barriers: [],
-      enemyFireTimer: 0,
-      banner: 0,
-      bannerSub: '',
-      message: '',
-      messageTimer: 0,
-      animTimer: 0,
-      frame: 0,
-    };
+    game = L.createGame(C);
     particles.length = 0;
     nextWave(0);
     state = 'playing';
@@ -101,6 +134,7 @@
       if (s.unlockWave === g.wave && g.wave > 1) showMessage('Nowe zaklęcie: ' + s.name + ' (klawisz ' + (i + 1) + ')', 3.5);
     });
     if (g.wave > 1) Sfx.play('wave');
+    persistGame(); // punkt kontrolny - nowa gra od razu zastępuje stary zapis
   }
 
   function showMessage(text, duration) {
@@ -332,8 +366,10 @@
     Sfx.play('gameover');
     game.bullets = [];
     game.enemyBullets = [];
-    if (L.qualifiesForHighscore(highscores, game.score, C.highscores.size)) {
-      nameBuffer = '';
+    discardSave();
+    // Zapisujemy każdy wynik (poza zerowym); imię podpowiadamy z poprzedniej gry.
+    if (game.score > 0) {
+      nameBuffer = settings.lastName || '';
       state = 'enterName';
     } else {
       state = 'gameover';
@@ -347,9 +383,16 @@
       wave: game.wave,
       date: new Date().toISOString().slice(0, 10),
     };
-    highscores = L.insertHighscore(highscores, entry, C.highscores.size);
-    lastRank = highscores.indexOf(entry);
-    Store.save(C.highscores.storageKey, highscores);
+    localScores = L.insertHighscore(localScores, entry, C.highscores.size);
+    Store.save(C.highscores.storageKey, localScores);
+    // Wynik widać w rankingu od razu; lista online odświeży się, gdy serwer potwierdzi zapis.
+    if (cloudScores) cloudScores = L.insertHighscore(cloudScores, entry, C.highscores.size);
+    lastRank = rankingList().indexOf(entry);
+    settings.lastName = entry.name;
+    Store.save(C.settingsKey, settings);
+    Cloud.submitScore(entry).then(id => {
+      if (id != null) loadCloudScores(id);
+    });
     state = 'ranking';
   }
 
@@ -778,6 +821,12 @@
     return Math.floor(time * 2) % 2 === 0;
   }
 
+  const CLOUD_LABELS = {
+    connecting: ['Łączenie z rankingiem...', '#8a7ab4'],
+    online: ['Ranking online', '#8affc1'],
+    offline: ['Offline – wyniki tylko lokalnie', '#ff8a9a'],
+  };
+
   function drawMenu() {
     title('Hexfall', C.width / 2, 112, 92);
     text('Obroń wieżę maga przed demonami z kręgu przywołania', C.width / 2, 172, 19, '#c9b8e8', 'center');
@@ -799,14 +848,21 @@
     ];
     lines.forEach((l, i) => text(l, C.width / 2, 364 + i * 26, 17, '#c9bdf0', 'center'));
 
-    if (blink()) text('Enter – zacznij grę', C.width / 2, 490, 28, P.gold, 'center', 700);
+    if (resumable) {
+      if (blink()) text('C – kontynuuj grę (fala ' + resumable.wave + ', ' + resumable.score + ' pkt)', C.width / 2, 482, 24, P.gold, 'center', 700);
+      text('Enter – nowa gra', C.width / 2, 514, 18, '#c9bdf0', 'center');
+    } else if (blink()) {
+      text('Enter – zacznij grę', C.width / 2, 490, 28, P.gold, 'center', 700);
+    }
     text('R – ranking      Rekord: ' + bestScore(), C.width / 2, 590, 16, '#9d8cc4', 'center');
+    const [label, color] = CLOUD_LABELS[Cloud.status()];
+    text(label, C.width - 12, 590, 14, color, 'right');
   }
 
   function drawPause() {
     dim(0.6);
     title('Pauza', C.width / 2, 250, 84);
-    text('P / Esc – wznów      Q – wyjdź do menu', C.width / 2, 320, 20, '#c9bdf0', 'center');
+    text('P / Esc – wznów      Q – zapisz i wyjdź do menu', C.width / 2, 320, 20, '#c9bdf0', 'center');
   }
 
   function drawGameOver() {
@@ -819,9 +875,10 @@
 
   function drawEnterName() {
     dim(0.7);
-    title('Nowy rekord!', C.width / 2, 195, 80);
+    if (L.qualifiesForHighscore(rankingList(), game.score, C.highscores.size)) title('Nowy rekord!', C.width / 2, 195, 80);
+    else title('Koniec gry', C.width / 2, 195, 80, ['#ffd0c0', '#ff6a5a', '#9a1f3a']);
     text('Wynik: ' + game.score + '     Fala: ' + game.wave, C.width / 2, 260, 22, P.parchment, 'center');
-    text('Wpisz swoje imię:', C.width / 2, 320, 20, '#c9bdf0', 'center');
+    text('Wpisz swoje imię do rankingu:', C.width / 2, 320, 20, '#c9bdf0', 'center');
     ctx.fillStyle = '#140c2c';
     ctx.fillRect(C.width / 2 - 150, 345, 300, 44);
     ctx.strokeStyle = P.gold;
@@ -834,6 +891,7 @@
   function drawRanking() {
     dim(0.45);
     title('Ranking', C.width / 2, 70, 72);
+    const highscores = rankingList();
     if (!highscores.length) {
       text('Brak wyników – zagraj pierwszy!', C.width / 2, 280, 22, '#c9bdf0', 'center');
     } else {
@@ -856,6 +914,7 @@
       });
     }
     text('Enter / Esc – menu', C.width / 2, 560, 18, '#9d8cc4', 'center');
+    text(cloudScores ? 'Ranking online – wszyscy gracze' : 'Ranking lokalny – ten komputer (offline)', C.width / 2, 586, 14, '#6a5a9a', 'center');
   }
 
   function render() {
@@ -924,6 +983,7 @@
     switch (state) {
       case 'menu':
         if (e.code === 'Enter') newGame();
+        else if (e.code === 'KeyC' && resumable) resumeGame();
         else if (e.code === 'KeyR') { lastRank = -1; state = 'ranking'; }
         break;
       case 'playing':
@@ -934,7 +994,7 @@
         break;
       case 'paused':
         if (e.code === 'KeyP' || e.code === 'Escape') state = 'playing';
-        else if (e.code === 'KeyQ') state = 'menu';
+        else if (e.code === 'KeyQ') { persistGame(); state = 'menu'; }
         break;
       case 'gameover':
         if (e.code === 'Enter') newGame();
@@ -949,8 +1009,11 @@
 
   window.addEventListener('keyup', e => keys.delete(e.code));
   window.addEventListener('blur', () => keys.clear());
+  // Ukrycie karty (też tuż przed jej zamknięciem) pauzuje grę i zapisuje ją do wznowienia.
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden && state === 'playing') state = 'paused';
+    if (!document.hidden) return;
+    if (state === 'playing') state = 'paused';
+    if (state === 'paused') persistGame();
   });
 
   // ---------- skalowanie i pętla ----------

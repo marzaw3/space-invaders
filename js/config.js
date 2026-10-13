@@ -74,6 +74,13 @@
     // Klucze z dawnej nazwy gry (Arcane Invaders) - zostają, żeby gracze nie stracili rankingu.
     highscores: { size: 10, nameMaxLength: 10, storageKey: 'arcaneInvaders.highscores' },
     settingsKey: 'arcaneInvaders.settings',
+
+    // Ranking online i zapis przerwanej gry (Supabase). Klucz publishable może być jawny -
+    // dostęp do danych chronią reguły RLS w bazie (supabase/migrations).
+    supabase: {
+      url: 'https://niwnsnhagxzjyeptrzkx.supabase.co',
+      publishableKey: 'sb_publishable__XXIr7QyUchi3yJ4VRCg-w_NqsiWA9k',
+    },
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = CONFIG;

@@ -252,6 +252,78 @@
     return name || 'MAG';
   }
 
+  // ---------- stan gry, zapis i wznowienie ----------
+
+  // Podnieś, gdy zmieni się format migawki - starsze zapisy zostaną zignorowane.
+  const SAVE_VERSION = 1;
+
+  // Stan przed pierwszą falą; formację i bariery tworzy dopiero start fali.
+  function createGame(cfg) {
+    return {
+      score: 0,
+      lives: cfg.player.lives,
+      wave: 0,
+      player: { x: (cfg.width - cfg.player.width) / 2, y: cfg.player.y, w: cfg.player.width, h: cfg.player.height, invuln: 0, cooldown: 0 },
+      ammo: cfg.ammo.max,
+      ammoTimer: 0,
+      mana: cfg.mana.max,
+      spellIndex: 0,
+      bullets: [],
+      enemyBullets: [],
+      formation: null,
+      barriers: [],
+      enemyFireTimer: 0,
+      banner: 0,
+      bannerSub: '',
+      message: '',
+      messageTimer: 0,
+      animTimer: 0,
+      frame: 0,
+    };
+  }
+
+  // Migawka do zapisu w bazie: tylko stan rozgrywki, bez pocisków w locie i komunikatów.
+  function snapshotGame(g) {
+    const copy = v => JSON.parse(JSON.stringify(v));
+    return {
+      score: g.score,
+      lives: g.lives,
+      wave: g.wave,
+      playerX: g.player.x,
+      ammo: g.ammo,
+      ammoTimer: g.ammoTimer,
+      mana: g.mana,
+      spellIndex: g.spellIndex,
+      enemyFireTimer: g.enemyFireTimer,
+      formation: copy(g.formation),
+      barriers: copy(g.barriers),
+    };
+  }
+
+  // Odtwarza grę z migawki; zwraca null, gdy wersja się nie zgadza albo dane są uszkodzone.
+  function restoreGame(data, version, cfg) {
+    if (version !== SAVE_VERSION || !data || typeof data !== 'object') return null;
+    const numbers = ['score', 'lives', 'wave', 'playerX', 'ammo', 'ammoTimer', 'mana', 'spellIndex', 'enemyFireTimer'];
+    if (!numbers.every(k => typeof data[k] === 'number' && Number.isFinite(data[k]))) return null;
+    if (data.lives < 1 || data.wave < 1 || !cfg.spells[data.spellIndex]) return null;
+    const f = data.formation;
+    if (!f || !Array.isArray(f.enemies) || !Array.isArray(data.barriers)) return null;
+
+    const g = createGame(cfg);
+    g.score = data.score;
+    g.lives = data.lives;
+    g.wave = data.wave;
+    g.player.x = data.playerX;
+    g.ammo = data.ammo;
+    g.ammoTimer = data.ammoTimer;
+    g.mana = data.mana;
+    g.spellIndex = data.spellIndex;
+    g.enemyFireTimer = data.enemyFireTimer;
+    g.formation = f;
+    g.barriers = data.barriers;
+    return g;
+  }
+
   const Logic = {
     rectsOverlap,
     wrapX, wrappedRects,
@@ -260,6 +332,7 @@
     BARRIER_SHAPE, createBarriers, hitBarrier, erodeBarriers,
     unlockedSpells, canCast, payCost, regenAmmo,
     extraLivesEarned, waveClearBonus, qualifiesForHighscore, insertHighscore, sanitizeName,
+    SAVE_VERSION, createGame, snapshotGame, restoreGame,
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = Logic;
