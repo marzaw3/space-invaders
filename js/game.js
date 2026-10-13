@@ -15,8 +15,6 @@
 
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
-  canvas.width = C.width;
-  canvas.height = C.height;
 
   // ---------- zapis w przeglądarce ----------
 
@@ -412,7 +410,8 @@
     grad.addColorStop(0.55, mid);
     grad.addColorStop(1, bottom);
     ctx.shadowColor = P.ember;
-    ctx.shadowBlur = 28;
+    // shadowBlur ignoruje transformację, więc skalujemy go ręcznie do rozdzielczości płótna.
+    ctx.shadowBlur = 28 * (canvas.width / C.width);
     ctx.fillStyle = grad;
     ctx.fillText(str, x, y);
     ctx.shadowBlur = 0;
@@ -428,9 +427,12 @@
     ctx.drawImage(s.img, Math.round(x - s.ox * k), Math.round(y - s.oy * k), s.img.width * k, s.img.height * k);
   }
 
+  // Poświata ma być miękka, więc tylko tu włączamy wygładzanie powiększanych obrazków.
   function glowAt(color, x, y, r, alpha) {
     ctx.globalAlpha = alpha;
+    ctx.imageSmoothingEnabled = true;
     ctx.drawImage(glow(color, 32), x - r, y - r, r * 2, r * 2);
+    ctx.imageSmoothingEnabled = false;
   }
 
   function drawStars() {
@@ -455,6 +457,7 @@
     const pulse = Math.min(1, sigilPulse);
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
+    ctx.imageSmoothingEnabled = true;
     ctx.translate(cx, cy);
     const r = 170 * scale * (1 + pulse * 0.15);
     ctx.globalAlpha = (0.12 + pulse * 0.3) * alpha;
@@ -856,6 +859,10 @@
   }
 
   function render() {
+    // Rysujemy w jednostkach 800×600, a transformacja przelicza je na piksele płótna.
+    // Obrazki pixel-art powiększamy bez wygładzania, żeby zostały ostre.
+    ctx.setTransform(canvas.width / C.width, 0, 0, canvas.height / C.height, 0, 0);
+    ctx.imageSmoothingEnabled = false;
     ctx.drawImage(Sprites.sky, 0, 0);
 
     const inGame = game && state !== 'menu' && state !== 'ranking';
@@ -948,10 +955,20 @@
 
   // ---------- skalowanie i pętla ----------
 
+  // Górny limit rozdzielczości płótna (3 = 2400×1800), żeby na ekranach 4K gra nie zwalniała.
+  const MAX_RENDER_SCALE = 3;
+
+  // Płótno dostaje rozdzielczość ekranu (z gęstością pikseli), dzięki czemu tekst i kształty są ostre.
+  // Logika gry dalej liczy w 800×600 - przeliczenie robi transformacja w render().
   function resize() {
     const s = Math.min(window.innerWidth / C.width, window.innerHeight / C.height);
-    canvas.style.width = Math.floor(C.width * s) + 'px';
-    canvas.style.height = Math.floor(C.height * s) + 'px';
+    const w = Math.floor(C.width * s);
+    const h = Math.floor(C.height * s);
+    const k = Math.min(window.devicePixelRatio || 1, MAX_RENDER_SCALE / s); // pikseli płótna na piksel CSS
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    canvas.width = Math.round(w * k);
+    canvas.height = Math.round(h * k);
   }
   window.addEventListener('resize', resize);
   resize();
