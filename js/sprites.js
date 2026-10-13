@@ -458,6 +458,52 @@
     return c;
   }
 
+  // Kłęby mgły z szumu wartości (kilka oktaw). Tekstura zawija się w obu osiach, więc można ją
+  // przesuwać w nieskończoność - z niej powstaje ruchoma mgła na obrazie menu.
+  function buildFogNoise(w, h, seed, color, cells) {
+    const c = canvas(w, h);
+    const g = c.getContext('2d');
+    const rand = rng(seed);
+    const octaves = [];
+    for (let o = 0; o < 4; o++) {
+      const gw = cells << o;
+      const gh = Math.max(1, Math.round((cells * h) / w)) << o;
+      const v = new Float32Array(gw * gh);
+      for (let i = 0; i < v.length; i++) v[i] = rand();
+      octaves.push({ gw, gh, v, amp: 0.5 ** o });
+    }
+    const total = octaves.reduce((s, o) => s + o.amp, 0);
+    const ease = t => t * t * (3 - 2 * t);
+    function sample(o, fx, fy) {
+      const x0 = Math.floor(fx);
+      const y0 = Math.floor(fy);
+      const tx = ease(fx - x0);
+      const ty = ease(fy - y0);
+      const at = (x, y) => o.v[(y % o.gh) * o.gw + (x % o.gw)];
+      const top = at(x0, y0) + (at(x0 + 1, y0) - at(x0, y0)) * tx;
+      const bottom = at(x0, y0 + 1) + (at(x0 + 1, y0 + 1) - at(x0, y0 + 1)) * tx;
+      return top + (bottom - top) * ty;
+    }
+    const [r, gr, b] = rgb(color);
+    const img = g.createImageData(w, h);
+    const d = img.data;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let n = 0;
+        for (const o of octaves) n += o.amp * sample(o, (x / w) * o.gw, (y / h) * o.gh);
+        // Próg i wygładzenie zostawiają osobne kłęby z miękkimi brzegami zamiast równej szarości.
+        const a = Math.min(1, Math.max(0, (n / total - 0.42) / 0.3));
+        const i = (y * w + x) * 4;
+        d[i] = r;
+        d[i + 1] = gr;
+        d[i + 2] = b;
+        d[i + 3] = Math.round(ease(a) * 255);
+      }
+    }
+    g.putImageData(img, 0, 0);
+    return c;
+  }
+
   // ---------- eksport ----------
 
   const Sprites = {
@@ -476,6 +522,8 @@
     parapet: buildParapet(C.width, C.player.y + C.player.height, C.height - C.hudBottom),
     vignette: buildVignette(C.width, C.height),
     mist: buildMist(C.width, 220),
+    fogValley: buildFogNoise(256, 128, 21, '#bcb0e8', 4),
+    fogPurple: buildFogNoise(256, 128, 37, '#b06ef0', 4),
   };
 
   for (const type of Object.keys(ENEMIES)) {

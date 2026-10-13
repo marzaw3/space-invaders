@@ -620,12 +620,16 @@
     braziers: [{ x: 22, y: 460 }, { x: 778, y: 460 }],
     portal: { x: 745, y: 25, r: 48, spin: -0.4 },
     moon: { x: 95, y: 74 },
-    windows: [[42, 306], [12, 132], [32, 130], [45, 135], [16, 200], [792, 212], [726, 308]],
+    windows: [[12, 132], [32, 130], [45, 135], [16, 200], [792, 212], [726, 308]],
+    lamp: { x: 30, y: 275, w: 19, h: 52, glow: [40, 302] }, // duże okno lewej wieży - światło w nim gaśnie i wraca
     town: [[311, 488], [547, 434]],
+    valley: { x: 166, y: 420, w: 453, h: 105 }, // miasteczko, brzegi rzeki i zamek w oddali - stąd światełka
     sky: { x0: 190, x1: 640, y0: 20, y1: 330 }, // niebo między wieżami
     mist: [[0, 230], [570, 800]], // fioletowa mgła w dolnych rogach
     mistTop: 400,
     mistBottom: 560,
+    fogValley: { y: 424, h: 110 }, // pas mgły nad doliną - kończy się na blankach
+    fogSides: { y: 318, h: 216 }, // fioletowe kłęby przy wieżach
   };
 
   const artStars = [];
@@ -656,6 +660,186 @@
     return c;
   }
 
+  // Wycinek obrazu "przy zgaszonym świetle": ciepłe, jasne piksele zamienia na ciemne szkło, resztę
+  // zostawia przezroczystą. Położony na obrazie z rosnącą alfą gasi światło, nie ruszając kamienia.
+  // Zwraca null, gdy przeglądarka nie da czytać pikseli (gra otwarta z file://).
+  function buildUnlit(rect) {
+    const k = menuArt.naturalWidth / C.width;
+    const sx = Math.floor(rect.x * k);
+    const sy = Math.floor(rect.y * k);
+    const w = Math.ceil(rect.w * k);
+    const h = Math.ceil(rect.h * k);
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    const g = c.getContext('2d');
+    g.drawImage(menuArt, sx, sy, w, h, 0, 0, w, h);
+    let img;
+    try {
+      img = g.getImageData(0, 0, w, h);
+    } catch (e) {
+      return null;
+    }
+    const d = img.data;
+    const lit = new Float32Array(w * h);
+    for (let i = 0; i < lit.length; i++) {
+      const r = d[i * 4];
+      const gr = d[i * 4 + 1];
+      const b = d[i * 4 + 2];
+      // Światło to piksel ciepły (pomarańczowy) albo po prostu bardzo jasny - środek płomienia jest prawie biały.
+      const warm = clamp((r - b - 20) / 60, 0, 1) * clamp((r - 70) / 80, 0, 1);
+      const bright = clamp((0.3 * r + 0.59 * gr + 0.11 * b - 150) / 60, 0, 1);
+      lit[i] = Math.max(warm, bright);
+      // Jaśniejsze szybki zostają odrobinę jaśniejsze, żeby po zgaszeniu było widać szprosy.
+      const v = (r + gr + b) / 765;
+      d[i * 4] = 16 + 24 * v;
+      d[i * 4 + 1] = 11 + 14 * v;
+      d[i * 4 + 2] = 28 + 30 * v;
+      d[i * 4 + 3] = lit[i] * 255;
+    }
+    g.putImageData(img, 0, 0);
+    return { canvas: c, lit, w, h, x: sx / k, y: sy / k, k };
+  }
+
+  // Światełka w dolinie: obraz dzielimy na komórki 4×4 piksele i każda świecąca komórka mruga osobno.
+  function buildTownLights(unlit) {
+    const CELL = 4;
+    const lights = [];
+    for (let cy = 0; cy < unlit.h; cy += CELL) {
+      for (let cx = 0; cx < unlit.w; cx += CELL) {
+        const cw = Math.min(CELL, unlit.w - cx);
+        const ch = Math.min(CELL, unlit.h - cy);
+        let sum = 0;
+        let mx = 0;
+        let my = 0;
+        for (let y = cy; y < cy + ch; y++) {
+          for (let x = cx; x < cx + cw; x++) {
+            const v = unlit.lit[y * unlit.w + x];
+            sum += v;
+            mx += v * (x + 0.5);
+            my += v * (y + 0.5);
+          }
+        }
+        if (sum < 1.2) continue;
+        lights.push({ cx, cy, cw, ch, x: unlit.x + mx / sum / unlit.k, y: unlit.y + my / sum / unlit.k,
+          s: Math.min(1, sum / 8), level: 1, target: 1, timer: Math.random() * 6 });
+      }
+    }
+    return lights;
+  }
+
+  // Okno lamp: świeci, powoli przygasa, chwilę się tli, a potem ktoś znów zapala świecę.
+  const LAMP_PHASES = {
+    lit: { next: 'fading', dur: () => 7 + Math.random() * 6 },
+    fading: { next: 'dark', dur: () => 2.5 + Math.random() },
+    dark: { next: 'relight', dur: () => 2.5 + Math.random() * 2.5 },
+    relight: { next: 'lit', dur: () => 1.2 + Math.random() * 0.4 },
+  };
+  const LAMP_DARK = 0.92;
+  const lamp = { phase: 'lit', t: 0, dur: 4, dim: 0 };
+  let lampUnlit;
+  let valleyUnlit;
+  let townLights = [];
+
+  function updateLamp(dt) {
+    lamp.t += dt;
+    if (lamp.t >= lamp.dur) {
+      lamp.phase = LAMP_PHASES[lamp.phase].next;
+      lamp.t = 0;
+      lamp.dur = LAMP_PHASES[lamp.phase].dur();
+    }
+    const p = lamp.t / lamp.dur;
+    const ease = p * p * (3 - 2 * p);
+    if (lamp.phase === 'lit') lamp.dim = 0;
+    else if (lamp.phase === 'fading') lamp.dim = LAMP_DARK * ease;
+    else if (lamp.phase === 'dark') lamp.dim = LAMP_DARK - 0.06 * flicker(3, 4);
+    // Świeżo zapalony knot chwilę się chwieje, zanim płomień się ustali.
+    else lamp.dim = clamp(LAMP_DARK * (1 - ease) + 0.35 * Math.sin(time * 23) * Math.sin(time * 7.3) * (1 - p), 0, 1);
+  }
+
+  // Światełko zwykle świeci, czasem gaśnie na ułamek sekundy, a czasem na chwilę rozbłyskuje.
+  function updateTownLights(dt) {
+    for (const l of townLights) {
+      if ((l.timer -= dt) <= 0) {
+        if (l.target !== 1) {
+          l.target = 1;
+          l.timer = 2 + Math.random() * 10;
+        } else if (Math.random() < 0.7) {
+          l.target = Math.random() * 0.15;
+          l.timer = 0.1 + Math.random() * 0.9;
+        } else {
+          l.target = 1.7;
+          l.timer = 0.1 + Math.random() * 0.3;
+        }
+      }
+      l.level += (l.target - l.level) * Math.min(1, dt * 12);
+    }
+  }
+
+  // Ruchoma mgła: kilka arkuszy szumu jadących w różne strony na małym płótnie, przyciętych maską
+  // do swojego pasa. Arkusze nachodzą na siebie, więc kłęby nie tylko płyną, ale też zmieniają kształt.
+  const FOG_RES = 2; // jednostek gry na piksel płótna mgły - mgła jest miękka, nie potrzebuje więcej
+  function fogLayer(area, alpha, sheets, maskStops) {
+    const buf = document.createElement('canvas');
+    buf.width = C.width / FOG_RES;
+    buf.height = Math.round(area.h / FOG_RES);
+    const mask = document.createElement('canvas');
+    mask.width = buf.width;
+    mask.height = buf.height;
+    const g = mask.getContext('2d');
+    g.fillStyle = '#000';
+    g.fillRect(0, 0, mask.width, mask.height);
+    g.globalCompositeOperation = 'destination-in';
+    for (const [x0, y0, x1, y1, stops] of maskStops(mask.width, mask.height)) {
+      const grad = g.createLinearGradient(x0, y0, x1, y1);
+      for (const [at, a] of stops) grad.addColorStop(at, 'rgba(0,0,0,' + a + ')');
+      g.fillStyle = grad;
+      g.fillRect(0, 0, mask.width, mask.height);
+    }
+    return { area, alpha, sheets, buf, mask };
+  }
+
+  const fogLayers = [
+    // Mgła nad doliną: dwa rozciągnięte w poziomie arkusze płyną w przeciwne strony.
+    fogLayer(ART_FX.fogValley, 0.55, [
+      { tex: Sprites.fogValley, sx: 2.2, sy: 0.55, vx: 10, vy: 0, sway: 0, alpha: 0.8 },
+      { tex: Sprites.fogValley, sx: 1.6, sy: 0.7, vx: -6, vy: 1.5, sway: 0, alpha: 0.6 },
+    ], (w, h) => [[0, 0, 0, h, [[0, 0], [0.45, 1], [0.82, 1], [1, 0]]]]),
+    // Fioletowe kłęby przy wieżach unoszą się i kołyszą - maska wygasza je ku środkowi ekranu.
+    fogLayer(ART_FX.fogSides, 0.6, [
+      { tex: Sprites.fogPurple, sx: 1.1, sy: 1, vx: 3, vy: -8, sway: 6, alpha: 0.85 },
+      { tex: Sprites.fogPurple, sx: 0.8, sy: 0.8, vx: -4, vy: -4.5, sway: 4, alpha: 0.6 },
+    ], (w, h) => [
+      [0, 0, w, 0, [[0, 1], [0.2, 0.85], [0.36, 0], [0.7, 0], [0.86, 0.85], [1, 1]]],
+      [0, 0, 0, h, [[0, 0], [0.45, 1], [0.9, 1], [1, 0]]],
+    ]),
+  ];
+
+  function drawFogLayer(L) {
+    const b = L.buf;
+    const g = b.getContext('2d');
+    g.clearRect(0, 0, b.width, b.height);
+    for (const s of L.sheets) {
+      const tw = s.tex.width * s.sx;
+      const th = s.tex.height * s.sy;
+      const ox = (((time * s.vx + Math.sin(time * 0.35) * s.sway) / FOG_RES) % tw + tw) % tw;
+      const oy = (((time * s.vy) / FOG_RES) % th + th) % th;
+      g.globalAlpha = s.alpha;
+      for (let x = ox - tw; x < b.width; x += tw) {
+        for (let y = oy - th; y < b.height; y += th) g.drawImage(s.tex, x, y, tw, th);
+      }
+    }
+    g.globalAlpha = 1;
+    g.globalCompositeOperation = 'destination-in';
+    g.drawImage(L.mask, 0, 0);
+    g.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = L.alpha;
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(b, 0, L.area.y, C.width, L.area.h);
+    ctx.imageSmoothingEnabled = false;
+    ctx.globalAlpha = 1;
+  }
+
   // Migotanie płomienia: 0..1, każde źródło światła w innej fazie.
   function flicker(i, speed) {
     return 0.5 + 0.3 * Math.sin(time * speed + i * 2.1) + 0.2 * Math.sin(time * speed * 2.17 + i);
@@ -663,6 +847,13 @@
 
   function updateArtFx(dt) {
     const F = ART_FX;
+    if (lampUnlit === undefined) {
+      lampUnlit = buildUnlit(F.lamp);
+      valleyUnlit = buildUnlit(F.valley);
+      if (valleyUnlit) townLights = buildTownLights(valleyUnlit);
+    }
+    updateLamp(dt);
+    updateTownLights(dt);
     for (const b of F.braziers) {
       if (Math.random() < dt * 9) {
         const life = 0.7 + Math.random() * 0.9;
@@ -746,13 +937,21 @@
     ctx.fillRect(Math.round(hx) - 1, Math.round(hy) - 1, 2, 2);
   }
 
+  // Gaszenie światła = nałożenie na obraz jego "zgaszonej" wersji (całej albo jednej komórki).
+  function drawUnlit(u, alpha, cx, cy, cw, ch) {
+    if (alpha <= 0.01) return;
+    ctx.globalAlpha = Math.min(1, alpha);
+    ctx.drawImage(u.canvas, cx, cy, cw, ch, u.x + cx / u.k, u.y + cy / u.k, cw / u.k, ch / u.k);
+  }
+
   function drawArtFx() {
     const F = ART_FX;
-    const mx = (time * 6) % C.width;
-    ctx.globalAlpha = 0.7;
-    ctx.drawImage(Sprites.mist, -mx, F.mistTop - 40);
-    ctx.drawImage(Sprites.mist, C.width - mx, F.mistTop - 40);
+    ctx.imageSmoothingEnabled = true;
+    if (lampUnlit) drawUnlit(lampUnlit, lamp.dim, 0, 0, lampUnlit.w, lampUnlit.h);
+    if (valleyUnlit) for (const l of townLights) drawUnlit(valleyUnlit, 1 - l.level, l.cx, l.cy, l.cw, l.ch);
+    ctx.imageSmoothingEnabled = false;
     ctx.globalAlpha = 1;
+    for (const L of fogLayers) drawFogLayer(L);
 
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
@@ -760,7 +959,15 @@
     glowAt(P.moonTeal, F.moon.x, F.moon.y, 60 + 4 * Math.sin(time * 0.9), 0.13 + 0.05 * Math.sin(time * 0.9));
     drawPortal();
     F.windows.forEach(([x, y], i) => glowAt(P.gold, x, y, 8, 0.12 + 0.18 * flicker(i, 5.3)));
+    const lampOn = 1 - lamp.dim;
+    glowAt(P.gold, F.lamp.glow[0], F.lamp.glow[1], 26, 0.12 * lampOn);
+    glowAt(P.gold, F.lamp.glow[0], F.lamp.glow[1], 10, (0.15 + 0.15 * flicker(7, 5.3)) * lampOn);
     F.town.forEach(([x, y], i) => glowAt(P.gold, x, y, 14, 0.1 + 0.08 * Math.sin(time * 1.7 + i * 2)));
+    townLights.forEach((l, i) => {
+      const on = Math.min(1, l.level);
+      const flare = Math.max(0, l.level - 1);
+      glowAt(P.gold, l.x, l.y, 3 + 2 * l.s + flare * 5, l.s * (0.16 * on * (0.8 + 0.2 * Math.sin(time * 6 + i)) + 0.5 * flare));
+    });
     F.braziers.forEach((b, i) => {
       const f = flicker(i, 11);
       glowAt(P.ember, b.x, b.y, 24 + f * 10, 0.3 + f * 0.3);
