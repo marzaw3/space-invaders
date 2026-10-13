@@ -523,6 +523,22 @@
     ctx.restore();
   }
 
+  // Malowane tło menu i rankingu. Dopóki się nie wczyta (albo gdy pliku brak), gra rysuje scenę z kodu.
+  const menuArt = new Image();
+  menuArt.src = 'img/menu.png';
+
+  function menuArtReady() {
+    return menuArt.complete && menuArt.naturalWidth > 0;
+  }
+
+  // Obraz nie trafia w siatkę pikseli płótna, więc skalujemy go z wygładzaniem - bez niego migotałby.
+  function drawMenuArt() {
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(menuArt, 0, 0, C.width, C.height);
+    ctx.imageSmoothingEnabled = false;
+  }
+
   function drawBackground(sigilAlpha) {
     drawStars();
     drawSigil(C.width / 2, 185, 1, sigilAlpha);
@@ -922,12 +938,18 @@
     // Obrazki pixel-art powiększamy bez wygładzania, żeby zostały ostre.
     ctx.setTransform(canvas.width / C.width, 0, 0, canvas.height / C.height, 0, 0);
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(Sprites.sky, 0, 0);
 
     const inGame = game && state !== 'menu' && state !== 'ranking';
+    // Rozgrywka zostaje na ciemnym niebie z kodu - na jasnym obrazie pociski byłyby słabo widoczne.
+    const art = !inGame && menuArtReady();
+    if (art) drawMenuArt();
+    else ctx.drawImage(Sprites.sky, 0, 0);
+
     ctx.save();
     if (shake > 0) ctx.translate((Math.random() - 0.5) * 24 * shake, (Math.random() - 0.5) * 24 * shake);
-    drawBackground(inGame ? 0.7 : 1);
+    // Obraz ma własne wieże, mgłę i blanki, więc dokładamy na nim tylko krąg przywołania.
+    if (art) drawSigil(C.width / 2, 185, 1, 1);
+    else drawBackground(inGame ? 0.7 : 1);
     if (inGame) drawWorld();
     else if (state === 'menu') drawMage((C.width - C.player.width) / 2, C.player.y);
     drawParticles();

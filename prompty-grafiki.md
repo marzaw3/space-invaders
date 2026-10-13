@@ -7,10 +7,10 @@ Płótno gry ma 800×600 (proporcje 4:3), grafika postaci to pixel-art w skali 3
 
 | # | Miejsce | Co teraz rysuje gra | Co musi zostać puste |
 |---|---|---|---|
-| 1 | **Menu główne** | niebo z kodu, krąg, wieże | środek: tytuł (y≈112), lista wrogów, sterowanie, „Enter” |
+| 1 | **Menu główne** – ✅ gotowe (`img/menu.png`) | obraz z pliku + krąg z kodu | środek: tytuł (y≈112), lista wrogów, sterowanie, „Enter” |
 | 2 | **Tło rozgrywki** | gradient `Sprites.sky` | cały ekran ma być ciemny i mało kontrastowy, bo latają po nim pociski |
 | 3 | **Koniec gry** | przyciemniona scena gry | środek: tytuł (y≈215) i wynik |
-| 4 | **Ranking** | przyciemnione tło menu | środek: tabela top 10 (x 165–635, y 110–510) |
+| 4 | **Ranking** | przyciemnione tło menu (czyli `img/menu.png`) | środek: tabela top 10 (x 165–635, y 110–510) |
 | 5 | *(opcjonalnie)* okładka do README na GitHubie | brak | nic, tu mogą być postacie |
 
 ## Wskazówki
@@ -58,17 +58,10 @@ Key art for a retro pixel-art fantasy arcade game, 16:9, 16-bit pixel art. A sma
 
 ## Jak podpiąć grafikę w grze
 
-W założeniach z `wymagania.md` (pkt 12.1) gra miała nie używać plików graficznych – dodanie obrazków zmienia tę decyzję.
+W założeniach z `wymagania.md` (pkt 12.1) gra miała nie używać plików graficznych – tło menu (`img/menu.png`) zmienia tę decyzję.
 Uruchamianie dwuklikiem w `index.html` nadal zadziała, bo przeglądarka pozwala rysować lokalne obrazki na canvasie.
 
-Najprostsze miejsce to funkcja `render()` w `js/game.js`, gdzie gra rysuje niebo (`ctx.drawImage(Sprites.sky, 0, 0)`):
-
-```js
-const skyImg = new Image();
-skyImg.src = 'img/sky.png';
-// w render():
-if (skyImg.complete && skyImg.naturalWidth) ctx.drawImage(skyImg, 0, 0, C.width, C.height);
-else ctx.drawImage(Sprites.sky, 0, 0);
-```
-
-Jeśli obrazek się nie wczyta, gra pokaże niebo rysowane kodem.
+Tło menu jest podpięte w `js/game.js` (`menuArt`, `drawMenuArt()` i `render()`). Na obrazie gra rysuje już tylko krąg przywołania –
+wieże, mgłę i blanki ma sam obraz. Jeśli plik się nie wczyta, gra pokaże scenę rysowaną kodem.
+Kolejne tła (rozgrywka, koniec gry) podpina się tak samo: `new Image()`, sprawdzenie `complete && naturalWidth` w `render()`
+i rysowanie z wygładzaniem w rozmiarze `C.width × C.height`.
