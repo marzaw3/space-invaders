@@ -458,12 +458,9 @@
     return c;
   }
 
-  // Kłęby mgły z szumu wartości (kilka oktaw). Tekstura zawija się w obu osiach, więc można ją
-  // przesuwać w nieskończoność - z niej powstaje ruchoma mgła na obrazie menu.
-  function buildFogNoise(w, h, seed, color, cells) {
-    const c = canvas(w, h);
-    const g = c.getContext('2d');
-    const rand = rng(seed);
+  // Szum wartości w kilku oktawach, 0..1. Zawija się na brzegach pola w×h, więc tekstury z niego
+  // można przesuwać w nieskończoność bez widocznego szwu.
+  function valueNoise(rand, w, h, cells) {
     const octaves = [];
     for (let o = 0; o < 4; o++) {
       const gw = cells << o;
@@ -484,20 +481,79 @@
       const bottom = at(x0, y0 + 1) + (at(x0 + 1, y0 + 1) - at(x0, y0 + 1)) * tx;
       return top + (bottom - top) * ty;
     }
-    const [r, gr, b] = rgb(color);
+    return (x, y) => {
+      let n = 0;
+      for (const o of octaves) n += o.amp * sample(o, (x / w) * o.gw, (y / h) * o.gh);
+      return n / total;
+    };
+  }
+
+  function setPixel(d, i, hex, alpha) {
+    const [r, g, b] = rgb(hex);
+    d[i] = r;
+    d[i + 1] = g;
+    d[i + 2] = b;
+    d[i + 3] = Math.round(alpha * 255);
+  }
+
+  // Kłęby mgły do ruchomej mgły na obrazie menu. Gęstość szumu dzielimy na kilka tonów
+  // [próg, kolor, alfa] - jak w malowanej pixel-artowej mgle, więc płynące smugi są wyraźne.
+  function buildFogNoise(w, h, seed, cells, tones) {
+    const c = canvas(w, h);
+    const g = c.getContext('2d');
+    const noise = valueNoise(rng(seed), w, h, cells);
     const img = g.createImageData(w, h);
-    const d = img.data;
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
-        let n = 0;
-        for (const o of octaves) n += o.amp * sample(o, (x / w) * o.gw, (y / h) * o.gh);
-        // Próg i wygładzenie zostawiają osobne kłęby z miękkimi brzegami zamiast równej szarości.
-        const a = Math.min(1, Math.max(0, (n / total - 0.42) / 0.3));
+        const n = noise(x, y);
+        let tone = null;
+        for (const t of tones) if (n >= t[0]) tone = t;
+        if (tone) setPixel(img.data, (y * w + x) * 4, tone[1], tone[2]);
+      }
+    }
+    g.putImageData(img, 0, 0);
+    return c;
+  }
+
+  // Chmura w stylu namalowanych przy księżycu: kilka kłębów na płaskim spodzie, poszarpany brzeg
+  // z szumu, jaśniejsze górne krawędzie (światło księżyca) i ciemniejszy spód.
+  function buildCloud(w, h, seed) {
+    const c = canvas(w, h);
+    const g = c.getContext('2d');
+    const rand = rng(seed);
+    const noise = valueNoise(rand, w, h, Math.max(3, Math.round(w / 8)));
+    // Kłęby stoją na wspólnej, długiej podstawie; środkowe są największe, więc chmura ma garb, a nie pas.
+    const base = h * 0.82;
+    const n = Math.max(4, Math.round(w / (h * 0.55)));
+    const puffs = [{ x: w / 2, y: base - h * 0.1, r: (w * 0.44) / 1.2, sy: (w * 0.44) / 1.2 / (h * 0.2) }];
+    for (let i = 0; i < n; i++) {
+      const t = i / (n - 1);
+      const r = h * (0.2 + 0.32 * (1 - (2 * t - 1) ** 2)) * (0.85 + 0.3 * rand());
+      puffs.push({ x: w * (0.12 + 0.76 * t), y: base - r * 0.35, r, sy: 1 });
+    }
+    const density = new Float32Array(w * h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        // Bez obcinania do zera: daleko od kłębów gęstość jest mocno ujemna i szum nie wyczaruje tam kresek.
+        let dd = -Infinity;
+        for (const p of puffs) dd = Math.max(dd, 1 - Math.hypot((x - p.x) / 1.2, (y - p.y) * p.sy) / p.r);
+        const flat = (base + h * 0.08 - y) / (h * 0.1); // płaski spód
+        const ends = 1.5 * (1 - ((x - w / 2) / (w * 0.49)) ** 2); // zwężenie ku końcom, nic nie dotyka krawędzi
+        density[y * w + x] = Math.min(dd, flat, ends) + (noise(x, y) - 0.5) * 0.5;
+      }
+    }
+    const at = (x, y) => (y < 0 || y >= h ? 0 : density[y * w + x]);
+    const img = g.createImageData(w, h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const dd = at(x, y);
+        if (dd < 0.06) continue;
+        const slope = at(x, y + 3) - at(x, y - 3); // > 0 przy górnej krawędzi, < 0 przy spodzie
         const i = (y * w + x) * 4;
-        d[i] = r;
-        d[i + 1] = gr;
-        d[i + 2] = b;
-        d[i + 3] = Math.round(ease(a) * 255);
+        if (at(x, y - 2) < 0.06) setPixel(img.data, i, '#8a8cc4', 0.9);
+        else if (slope > 0.16) setPixel(img.data, i, '#5c4a8c', 0.92);
+        else if (slope < -0.12 || dd < 0.16) setPixel(img.data, i, '#2a1c4a', 0.85);
+        else setPixel(img.data, i, '#3d2c68', 0.92);
       }
     }
     g.putImageData(img, 0, 0);
@@ -522,8 +578,9 @@
     parapet: buildParapet(C.width, C.player.y + C.player.height, C.height - C.hudBottom),
     vignette: buildVignette(C.width, C.height),
     mist: buildMist(C.width, 220),
-    fogValley: buildFogNoise(256, 128, 21, '#bcb0e8', 4),
-    fogPurple: buildFogNoise(256, 128, 37, '#b06ef0', 4),
+    fogValley: buildFogNoise(256, 128, 21, 6, [[0.48, '#7d74b0', 0.35], [0.58, '#a59cd2', 0.5], [0.68, '#cfc6ee', 0.6]]),
+    fogPurple: buildFogNoise(256, 128, 37, 6, [[0.46, '#7a3cb8', 0.4], [0.56, '#a862e6', 0.55], [0.66, '#dca8ff', 0.65]]),
+    clouds: [[170, 56, 3], [120, 42, 8], [210, 66, 13], [95, 34, 17], [150, 50, 29], [190, 60, 41]].map(([w, h, seed]) => buildCloud(w, h, seed)),
   };
 
   for (const type of Object.keys(ENEMIES)) {

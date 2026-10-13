@@ -630,6 +630,12 @@
     mistBottom: 560,
     fogValley: { y: 424, h: 110 }, // pas mgły nad doliną - kończy się na blankach
     fogSides: { y: 318, h: 216 }, // fioletowe kłęby przy wieżach
+    // Otwarte niebo (obrys z zapasem od wież i gór) - tylko tu widać przesuwające się chmury,
+    // więc wyglądają, jakby chowały się za wieżami.
+    openSky: [[40, 0], [42, 60], [60, 72], [60, 135], [72, 150], [72, 195], [104, 200], [118, 210], [130, 250],
+      [132, 300], [160, 300], [166, 345], [300, 352], [520, 352], [680, 345], [700, 315], [720, 240], [738, 200],
+      [748, 140], [762, 136], [800, 118], [800, 0]],
+    cloudLanes: [42, 98, 158, 214, 272], // wysokości, na których płyną chmury
   };
 
   const artStars = [];
@@ -801,14 +807,14 @@
 
   const fogLayers = [
     // Mgła nad doliną: dwa rozciągnięte w poziomie arkusze płyną w przeciwne strony.
-    fogLayer(ART_FX.fogValley, 0.55, [
-      { tex: Sprites.fogValley, sx: 2.2, sy: 0.55, vx: 10, vy: 0, sway: 0, alpha: 0.8 },
-      { tex: Sprites.fogValley, sx: 1.6, sy: 0.7, vx: -6, vy: 1.5, sway: 0, alpha: 0.6 },
+    fogLayer(ART_FX.fogValley, 0.6, [
+      { tex: Sprites.fogValley, sx: 2.2, sy: 0.55, vx: 18, vy: 0, sway: 0, alpha: 0.8 },
+      { tex: Sprites.fogValley, sx: 1.6, sy: 0.7, vx: -11, vy: 2, sway: 0, alpha: 0.6 },
     ], (w, h) => [[0, 0, 0, h, [[0, 0], [0.45, 1], [0.82, 1], [1, 0]]]]),
     // Fioletowe kłęby przy wieżach unoszą się i kołyszą - maska wygasza je ku środkowi ekranu.
-    fogLayer(ART_FX.fogSides, 0.6, [
-      { tex: Sprites.fogPurple, sx: 1.1, sy: 1, vx: 3, vy: -8, sway: 6, alpha: 0.85 },
-      { tex: Sprites.fogPurple, sx: 0.8, sy: 0.8, vx: -4, vy: -4.5, sway: 4, alpha: 0.6 },
+    fogLayer(ART_FX.fogSides, 0.8, [
+      { tex: Sprites.fogPurple, sx: 1.1, sy: 1, vx: 5, vy: -16, sway: 12, alpha: 0.85 },
+      { tex: Sprites.fogPurple, sx: 0.8, sy: 0.8, vx: -7, vy: -9, sway: 8, alpha: 0.6 },
     ], (w, h) => [
       [0, 0, w, 0, [[0, 1], [0.2, 0.85], [0.36, 0], [0.7, 0], [0.86, 0.85], [1, 1]]],
       [0, 0, 0, h, [[0, 0], [0.45, 1], [0.9, 1], [1, 0]]],
@@ -840,6 +846,54 @@
     ctx.globalAlpha = 1;
   }
 
+  // Chmury płyną z lewej na prawo, każda na swoim pasie i we własnym tempie (wyższe wolniej).
+  // Rysujemy je na osobnym płótnie przyciętym do otwartego nieba, więc chowają się za wieżami.
+  const CLOUD_SKY_H = 360;
+  const cloudBuf = document.createElement('canvas');
+  cloudBuf.width = C.width;
+  cloudBuf.height = CLOUD_SKY_H;
+  const skyMask = document.createElement('canvas');
+  skyMask.width = C.width;
+  skyMask.height = CLOUD_SKY_H;
+  {
+    const g = skyMask.getContext('2d');
+    g.filter = 'blur(3px)'; // miękki brzeg tam, gdzie chmura wchodzi za wieżę (bez obsługi filtra - ostry)
+    g.fillStyle = '#000';
+    g.beginPath();
+    ART_FX.openSky.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
+    g.fill();
+  }
+
+  function newCloud(lane, onScreen) {
+    const tex = Sprites.clouds[Math.floor(Math.random() * Sprites.clouds.length)];
+    const y = ART_FX.cloudLanes[lane];
+    return { lane, tex, y: y + (Math.random() - 0.5) * 16 - tex.height / 2,
+      x: onScreen ? Math.random() * C.width - tex.width / 2 : -tex.width - Math.random() * 160,
+      v: 7 + lane * 2.2 + Math.random() * 3 };
+  }
+  const clouds = ART_FX.cloudLanes.map((_, lane) => newCloud(lane, true));
+
+  function updateClouds(dt) {
+    clouds.forEach((c, i) => {
+      c.x += c.v * dt;
+      if (c.x > C.width) clouds[i] = newCloud(c.lane, false);
+    });
+  }
+
+  function drawClouds() {
+    const g = cloudBuf.getContext('2d');
+    g.clearRect(0, 0, cloudBuf.width, cloudBuf.height);
+    for (const c of clouds) g.drawImage(c.tex, c.x, c.y);
+    g.globalCompositeOperation = 'destination-in';
+    g.drawImage(skyMask, 0, 0);
+    g.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 0.85;
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(cloudBuf, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.globalAlpha = 1;
+  }
+
   // Migotanie płomienia: 0..1, każde źródło światła w innej fazie.
   function flicker(i, speed) {
     return 0.5 + 0.3 * Math.sin(time * speed + i * 2.1) + 0.2 * Math.sin(time * speed * 2.17 + i);
@@ -854,6 +908,7 @@
     }
     updateLamp(dt);
     updateTownLights(dt);
+    updateClouds(dt);
     for (const b of F.braziers) {
       if (Math.random() < dt * 9) {
         const life = 0.7 + Math.random() * 0.9;
@@ -951,6 +1006,17 @@
     if (valleyUnlit) for (const l of townLights) drawUnlit(valleyUnlit, 1 - l.level, l.cx, l.cy, l.cw, l.ch);
     ctx.imageSmoothingEnabled = false;
     ctx.globalAlpha = 1;
+    // Gwiazdy i spadająca gwiazda przed chmurami - chmura ma je zasłonić.
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const s of artStars) {
+      ctx.globalAlpha = 0.15 + 0.6 * Math.max(0, Math.sin(time * s.f + s.p));
+      ctx.fillStyle = '#fff6e0';
+      ctx.fillRect(Math.round(s.x), Math.round(s.y), 1, 1);
+    }
+    if (shootingStar) drawShootingStar();
+    ctx.restore();
+    drawClouds();
     for (const L of fogLayers) drawFogLayer(L);
 
     ctx.save();
@@ -973,13 +1039,6 @@
       glowAt(P.ember, b.x, b.y, 24 + f * 10, 0.3 + f * 0.3);
       glowAt('#ffd27a', b.x, b.y + 2, 10 + f * 5, 0.3 + f * 0.3);
     });
-
-    for (const s of artStars) {
-      ctx.globalAlpha = 0.15 + 0.6 * Math.max(0, Math.sin(time * s.f + s.p));
-      ctx.fillStyle = '#fff6e0';
-      ctx.fillRect(Math.round(s.x), Math.round(s.y), 1, 1);
-    }
-    if (shootingStar) drawShootingStar();
 
     const p = F.portal;
     for (const m of artMotes) {
